@@ -8,3 +8,6 @@ __pycache__/
 data/private/
 data/uploads/
 *.db
+
+# IDE
+.idea/
