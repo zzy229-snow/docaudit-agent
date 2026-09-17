@@ -19,6 +19,7 @@ class ToolCallRecord(BaseModel):
     tool_name: str
     status: Literal["success", "failed", "skipped"]
     summary: str
+    input_summary: dict[str, Any] = Field(default_factory=dict)
     evidence_refs: list[str] = Field(default_factory=list)
 
 
@@ -52,12 +53,20 @@ def finish_node(state: "AuditState", node: str, started_at: float, message: str)
     state.setdefault("trace", []).append(f"{node}: {message} ({elapsed_ms}ms)")
 
 
-def record_tool_call(state: "AuditState", tool_name: str, status: str, summary: str, evidence_refs: list[str] | None = None) -> None:
+def record_tool_call(
+    state: "AuditState",
+    tool_name: str,
+    status: str,
+    summary: str,
+    evidence_refs: list[str] | None = None,
+    input_summary: dict[str, Any] | None = None,
+) -> None:
     state.setdefault("tool_calls", []).append(
         ToolCallRecord(
             tool_name=tool_name,
             status=status,  # type: ignore[arg-type]
             summary=summary,
+            input_summary=input_summary or {},
             evidence_refs=evidence_refs or [],
         )
     )

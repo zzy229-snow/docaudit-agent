@@ -161,29 +161,69 @@ pip install -r requirements.txt
 - 缺少付款材料进入复核。
 - 图片和扫描 PDF 会进入 Mock OCR 路由。
 
-## 9. 后续开发路线
+## 9. Tool Schema 与注册表
+
+第二阶段新增 `app/tools/schema.py` 和 `app/tools/registry.py`，将业务工具从直接函数调用升级为统一注册表执行。
+
+当前注册工具：
+
+| 工具 | 类别 | 职责 |
+| --- | --- | --- |
+| `required_documents` | `document` | 检查发票、付款凭证、审批单是否齐全 |
+| `amount_match` | `amount` | 检查发票金额和付款金额是否一致 |
+| `date_range` | `date` | 检查发票日期是否位于出差日期范围内 |
+| `hotel_limit` | `policy` | 基于制度证据检查住宿金额是否超标 |
+
+每个工具包含：
+
+- `ToolSpec`：工具名、描述、类别、输入字段、幂等性和超时配置。
+- `RegisteredTool`：工具元数据和实际 handler。
+- `ToolExecution`：工具规范、输入摘要和结构化结果。
+
+`check` 节点现在通过 `get_tool(name).execute(**kwargs)` 执行工具，不再直接调用底层函数。这样后续接入 LangGraph、Planner 或评测系统时，可以统一回答这些问题：
+
+- Agent 调用了哪个工具？
+- 工具输入是什么？
+- 工具输出是通过、失败还是无法判断？
+- 该工具是否幂等，能不能自动重试？
+- 哪些证据参与了本次判断？
+
+新增测试文件：`tests/test_tool_registry.py`
+
+覆盖内容：
+
+| 测试 | 验证点 |
+| --- | --- |
+| `test_registry_contains_core_audit_tools` | 四个核心审核工具已注册且默认幂等 |
+| `test_amount_tool_executes_through_registry` | 金额工具可以通过注册表执行并保留输入摘要 |
+| `test_hotel_limit_tool_keeps_policy_evidence_summary` | 制度工具可以处理证据列表并保留证据引用 |
+| `test_unknown_tool_is_rejected` | 未注册工具会被拒绝 |
+
+## 10. 后续开发路线
 
 建议后续按以下顺序推进：
 
 1. 将 `AuditState` 从 `TypedDict` 进一步收敛为 Pydantic 输入/输出模型。
-2. 给 Tool 定义统一 schema，包括名称、输入、输出、幂等性、超时和重试策略。
+2. 给 Tool 增加超时、错误捕获和重试预算。
 3. 用 LangGraph 替换当前手写 for-loop，但复用现有节点函数。
 4. 增加条件边：缺字段、低置信度、无制度依据时进入人工复核节点。
 5. 增加 trace 导出能力，输出 JSON 回归报告。
 6. 将 Streamlit 页面中的执行轨迹从字符串升级成表格视图。
 
-## 10. 分支与提交建议
+## 11. 分支与提交建议
 
 推荐分支：
 
 ```text
 feature/agent-workflow
+feature/agent-tool-schema
 ```
 
 推荐提交信息：
 
 ```text
 feat(agent): add workflow state tracing and guardrails
+feat(agent): add tool schema registry
 ```
 
 合并策略：

@@ -3,9 +3,7 @@ from app.models.state import HumanReviewItem, finish_node, record_tool_call, sta
 from app.parsers.loader import parse_document
 from app.extraction.field_extractor import extract_fields
 from app.rag.retriever import retrieve_policy
-from app.tools.amount_tool import compare_amounts, compare_hotel_limit
-from app.tools.date_tool import compare_date_range
-from app.tools.document_tool import check_required_documents
+from app.tools.registry import get_tool
 
 
 def parse_documents(state: dict) -> dict:
@@ -41,19 +39,30 @@ def check(state: dict) -> dict:
     started_at = start_node(state, "check", "开始执行确定性业务工具")
     fields = state["fields"]
     get = lambda key: str(fields[key].value) if key in fields else None
-    results = [
-        check_required_documents([d.file_name for d in state["documents"]]),
-        compare_amounts(get("invoice_amount"), get("payment_amount")),
-        compare_date_range(get("invoice_date"), get("travel_start_date"), get("travel_end_date")),
-        compare_hotel_limit(get("invoice_amount"), state["policy_evidence"]),
+    tool_inputs = [
+        ("required_documents", {"document_names": [d.file_name for d in state["documents"]]}),
+        ("amount_match", {"invoice_amount": get("invoice_amount"), "payment_amount": get("payment_amount")}),
+        (
+            "date_range",
+            {
+                "invoice_date": get("invoice_date"),
+                "travel_start_date": get("travel_start_date"),
+                "travel_end_date": get("travel_end_date"),
+            },
+        ),
+        ("hotel_limit", {"invoice_amount": get("invoice_amount"), "policy_evidence": state["policy_evidence"]}),
     ]
-    for result in results:
+    executions = [get_tool(name).execute(**kwargs) for name, kwargs in tool_inputs]
+    results = [execution.result for execution in executions]
+    for execution in executions:
+        result = execution.result
         record_tool_call(
             state,
-            result.name,
+            execution.spec.name,
             "success" if result.passed is True else "failed" if result.passed is False else "skipped",
             result.detail,
             result.evidence_refs,
+            execution.input_summary,
         )
     risks = []
     human_review_items = list(state.get("human_review_items", []))
