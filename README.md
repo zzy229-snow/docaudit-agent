@@ -17,6 +17,14 @@ streamlit run streamlit_app.py
 
 打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
 
+## FastAPI接口
+
+```bash
+python -m uvicorn app.api.main:app --reload --port 8102
+```
+
+接口文档地址：`http://127.0.0.1:8102/docs`。当前API使用内存任务存储，支持创建任务、上传材料、运行审核，以及查询字段、风险和执行轨迹。详细说明见 `docs/API.md`。
+
 ## 测试
 
 ```bash
