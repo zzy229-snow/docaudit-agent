@@ -88,6 +88,11 @@ class AuditTaskApiTests(unittest.TestCase):
             json={"value": "580.00", "reason": "人工核对付款截图，金额应为580.00"},
         )
         self.assertEqual(payment_correction.status_code, 200)
+        buyer_correction = self.client.patch(
+            f"/api/v1/audit-tasks/{task_id}/fields/invoice_buyer",
+            json={"value": "张三", "reason": "人工核对发票抬头，购买方为申请人本人"},
+        )
+        self.assertEqual(buyer_correction.status_code, 200)
 
         rerun = self.client.post(f"/api/v1/audit-tasks/{task_id}/run")
         self.assertEqual(rerun.status_code, 200)

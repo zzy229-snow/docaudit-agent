@@ -33,7 +33,8 @@ def make_doc(text: str, file_name: str = "invoice.txt", document_id: str = "d1",
 
 UNLABELED_TEXT = (
     "出差申请:8月1日 至 8月2日 赴 上海 参加行业会议,"
-    "住宿费人民币陆佰捌拾元整,发票号 TEST-2026-00099,申请人 李四。"
+    "住宿费人民币陆佰捌拾元整,发票号 TEST-2026-00099,申请人 李四,"
+    "购买方 李四,收款方 李四。"
 )
 LLM_PAYLOAD = {
     "invoice_amount": {"value": "680.00", "page": 1, "evidence": "陆佰捌拾元整"},
@@ -44,6 +45,8 @@ LLM_PAYLOAD = {
     "travel_city": {"value": "上海", "page": 1, "evidence": "赴 上海"},
     "invoice_number": {"value": "TEST-2026-00099", "page": 1, "evidence": "发票号 TEST-2026-00099"},
     "applicant_name": {"value": "李四", "page": 1, "evidence": "申请人 李四"},
+    "invoice_buyer": {"value": "李四", "page": 1, "evidence": "购买方 李四"},
+    "payment_party": {"value": "李四", "page": 1, "evidence": "收款方 李四"},
 }
 
 
@@ -54,11 +57,13 @@ class LlmExtractionTests(unittest.TestCase):
         gw = FakeGateway(payload=LLM_PAYLOAD)
         docs = [make_doc(UNLABELED_TEXT)]
         fields = extract_fields(docs, gateway=gw)
-        self.assertEqual(len(fields), 8)
+        self.assertEqual(len(fields), 10)
         self.assertEqual(fields["invoice_amount"].value, "680.00")
         self.assertEqual(fields["invoice_amount"].confidence, 0.85)
         self.assertEqual(fields["travel_city"].value, "上海")
         self.assertEqual(fields["applicant_name"].value, "李四")
+        self.assertEqual(fields["invoice_buyer"].value, "李四")
+        self.assertEqual(fields["payment_party"].value, "李四")
         self.assertEqual(fields["invoice_date"].source_text, "开票 2026-08-01")
 
     def test_regex_wins_over_llm_on_conflict(self):
@@ -79,7 +84,7 @@ class LlmExtractionTests(unittest.TestCase):
         docs = [make_doc(UNLABELED_TEXT)]
         fields = extract_fields(docs, gateway=gw)
         self.assertNotIn("travel_city", fields)
-        self.assertEqual(len(fields), 7)
+        self.assertEqual(len(fields), 9)
 
     def test_gateway_failure_degrades_to_regex(self):
         """LLM 调用抛错:降级纯正则,不中断,结果与正则基线一致。"""

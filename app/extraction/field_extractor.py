@@ -14,6 +14,8 @@ LABELS = {
     "travel_city": r"(?:出差城市|目的地)\s*[:：]?\s*([\u4e00-\u9fff]{2,8})",
     "invoice_number": r"(?:发票号码|发票号)\s*[:：]?\s*([A-Za-z0-9-]{5,32})",
     "applicant_name": r"(?:申请人|报销人)\s*[:：]?\s*([\u4e00-\u9fff]{2,5})",
+    "invoice_buyer": r"(?:购买方|购方名称|发票抬头)\s*[:：]?\s*([\u4e00-\u9fff]{2,16})",
+    "payment_party": r"(?:收款方|收款人|收款单位|收款账户名)\s*[:：]?\s*([\u4e00-\u9fff]{2,16})",
 }
 
 # LLM 抽取的目标字段清单:字段名 -> (中文含义, 抽取提示)
@@ -26,6 +28,8 @@ LLM_FIELDS: dict[str, str] = {
     "travel_city": "出差城市/目的地,中文城市名。",
     "invoice_number": "发票号码,字母数字连字符组合。",
     "applicant_name": "申请人/报销人姓名,中文姓名。",
+    "invoice_buyer": "发票购买方/购方抬头,中文单位名称或姓名。",
+    "payment_party": "付款凭证上的收款方/收款人,中文单位名称或姓名。",
 }
 
 LLM_CONFIDENCE = 0.85
