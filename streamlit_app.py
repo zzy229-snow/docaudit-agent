@@ -1,8 +1,10 @@
 import streamlit as st
+from dotenv import load_dotenv
 
 from app.agent.graph import run_audit
 from app.services.audit_summary import build_audit_summary
 
+load_dotenv()
 
 st.set_page_config(page_title="DocAudit Agent", layout="wide")
 st.title("企业报销材料审核")

@@ -1,5 +1,6 @@
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
+from dotenv import load_dotenv
 
 from app.agent.graph import run_audit
 from app.api.store import AuditTask, FieldCorrection, ReviewItem, ReviewStatus, task_store
@@ -7,6 +8,7 @@ from app.models.audit import CheckResult, RiskItem
 from app.models.field import ExtractedField
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
 
+load_dotenv()
 
 app = FastAPI(title="DocAudit Agent API", version="0.1.0")
 
