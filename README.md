@@ -23,7 +23,7 @@ streamlit run streamlit_app.py
 python -m uvicorn app.api.main:app --reload --port 8102
 ```
 
-接口文档地址：`http://127.0.0.1:8102/docs`。当前API使用内存任务存储，支持创建任务、上传材料、运行审核，以及查询字段、风险和执行轨迹。详细说明见 `docs/API.md`。
+接口文档地址：`http://127.0.0.1:8102/docs`。当前API使用内存任务存储，支持创建任务、上传材料、运行审核，以及查询字段、风险、执行轨迹和可解释摘要。详细说明见 `docs/API.md`。
 
 ## 测试
 

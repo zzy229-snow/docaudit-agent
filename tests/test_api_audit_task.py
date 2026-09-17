@@ -61,6 +61,13 @@ class AuditTaskApiTests(unittest.TestCase):
         self.assertEqual(risks.status_code, 200)
         self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in risks.json()["risks"]))
 
+        summary = self.client.get(f"/api/v1/audit-tasks/{task_id}/summary")
+        self.assertEqual(summary.status_code, 200)
+        payload = summary.json()["summary"]
+        self.assertEqual(payload["status"], "REVIEW_REQUIRED")
+        self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in payload["risks"]))
+        self.assertTrue(any(item["chunk_id"] == "TRAVEL-V1-4.2-A" for item in payload["policy_evidence"]))
+
     def test_running_empty_task_is_rejected(self):
         task_id = self.create_task()
 

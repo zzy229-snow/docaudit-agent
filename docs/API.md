@@ -34,6 +34,7 @@ http://127.0.0.1:8102/docs
 | `GET` | `/api/v1/audit-tasks/{task_id}/fields` | 获取结构化字段 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/risks` | 获取风险列表 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/trace` | 获取执行轨迹 |
+| `GET` | `/api/v1/audit-tasks/{task_id}/summary` | 获取面向页面展示的可解释摘要 |
 
 ## 4. 状态流转
 
@@ -70,11 +71,28 @@ API 测试会覆盖：
 - 创建审核任务。
 - 上传 `data/demo/normal` 三份样例并得到 `PASS`。
 - 上传 `data/demo/over_limit` 三份样例并得到 `REVIEW_REQUIRED`。
-- 查询字段、风险和执行轨迹。
+- 查询字段、风险、执行轨迹和可解释摘要。
 - 空任务运行被拒绝。
 - 不存在的任务返回 `404`。
 
-## 6. 当前限制
+## 6. 可解释摘要
+
+`GET /api/v1/audit-tasks/{task_id}/summary` 返回面向前端展示的结构化摘要，适合直接渲染审核结果页。
+
+摘要包含：
+
+| 字段 | 含义 |
+| --- | --- |
+| `status` | 审核状态 |
+| `conclusion` | 面向用户的结论说明 |
+| `next_action` | 建议下一步动作 |
+| `key_fields` | 关键字段、置信度和原文来源 |
+| `risks` | 风险类型、级别、原因、证据和处理建议 |
+| `checks` | 各业务工具的检查状态与说明 |
+| `policy_evidence` | 制度条款引用 |
+| `trace` | Agent 执行轨迹 |
+
+## 7. 当前限制
 
 - 任务存储在内存中，进程重启后任务丢失。
 - 尚未实现用户、角色和权限控制。
@@ -84,7 +102,7 @@ API 测试会覆盖：
 
 这些限制是有意保留的 MVP 边界，避免在 Agent 主线尚未稳定时过早引入数据库和权限复杂度。
 
-## 7. 后续建议
+## 8. 后续建议
 
 优先级建议：
 

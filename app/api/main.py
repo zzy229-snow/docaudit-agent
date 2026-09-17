@@ -5,6 +5,7 @@ from app.agent.graph import run_audit
 from app.api.store import AuditTask, task_store
 from app.models.audit import CheckResult, RiskItem
 from app.models.field import ExtractedField
+from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
 
 
 app = FastAPI(title="DocAudit Agent API", version="0.1.0")
@@ -42,6 +43,11 @@ class RisksResponse(BaseModel):
 class TraceResponse(BaseModel):
     task_id: str
     trace: list[str]
+
+
+class SummaryResponse(BaseModel):
+    task_id: str
+    summary: AuditExplanationSummary
 
 
 @app.get("/health")
@@ -99,6 +105,12 @@ def get_risks(task_id: str) -> RisksResponse:
 def get_trace(task_id: str) -> TraceResponse:
     task = _require_completed_task(task_id)
     return TraceResponse(task_id=task.task_id, trace=task.report.trace)
+
+
+@app.get("/api/v1/audit-tasks/{task_id}/summary", response_model=SummaryResponse)
+def get_summary(task_id: str) -> SummaryResponse:
+    task = _require_completed_task(task_id)
+    return SummaryResponse(task_id=task.task_id, summary=build_audit_summary(task.report))
 
 
 def _require_task(task_id: str) -> AuditTask:
