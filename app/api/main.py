@@ -2,7 +2,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
 from app.agent.graph import run_audit
-from app.api.store import AuditTask, task_store
+from app.api.store import AuditTask, FieldCorrection, ReviewItem, ReviewStatus, task_store
 from app.models.audit import CheckResult, RiskItem
 from app.models.field import ExtractedField
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
@@ -50,6 +50,30 @@ class SummaryResponse(BaseModel):
     summary: AuditExplanationSummary
 
 
+class FieldCorrectionRequest(BaseModel):
+    value: str
+    reason: str
+
+
+class FieldCorrectionResponse(BaseModel):
+    task_id: str
+    correction: FieldCorrection
+
+
+class ReviewItemsResponse(BaseModel):
+    task_id: str
+    review_items: list[ReviewItem]
+
+
+class ReviewDecisionRequest(BaseModel):
+    decision: ReviewStatus
+    decided_by: str | None = None
+
+
+class ReviewDecisionResponse(BaseModel):
+    review_item: ReviewItem
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
@@ -76,7 +100,10 @@ def run_audit_task(task_id: str) -> RunResponse:
     if not task.files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task has no uploaded documents")
     try:
-        report = run_audit([(item.file_name, item.content) for item in task.files])
+        report = run_audit(
+            [(item.file_name, item.content) for item in task.files],
+            field_overrides=task_store.field_overrides(task.task_id),
+        )
     except (ValueError, RuntimeError) as exc:
         failed = task_store.save_error(task.task_id, str(exc))
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=failed.error) from exc
@@ -111,6 +138,28 @@ def get_trace(task_id: str) -> TraceResponse:
 def get_summary(task_id: str) -> SummaryResponse:
     task = _require_completed_task(task_id)
     return SummaryResponse(task_id=task.task_id, summary=build_audit_summary(task.report))
+
+
+@app.get("/api/v1/audit-tasks/{task_id}/review-items", response_model=ReviewItemsResponse)
+def get_review_items(task_id: str) -> ReviewItemsResponse:
+    task = _require_task(task_id)
+    return ReviewItemsResponse(task_id=task.task_id, review_items=task.review_items)
+
+
+@app.patch("/api/v1/audit-tasks/{task_id}/fields/{field_name}", response_model=FieldCorrectionResponse)
+def correct_field(task_id: str, field_name: str, request: FieldCorrectionRequest) -> FieldCorrectionResponse:
+    _require_task(task_id)
+    correction = task_store.save_field_correction(task_id, field_name, request.value, request.reason)
+    return FieldCorrectionResponse(task_id=task_id, correction=correction)
+
+
+@app.post("/api/v1/review-items/{review_item_id}/decision", response_model=ReviewDecisionResponse)
+def decide_review_item(review_item_id: str, request: ReviewDecisionRequest) -> ReviewDecisionResponse:
+    try:
+        item = task_store.decide_review_item(review_item_id, request.decision, request.decided_by)
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Review item not found") from exc
+    return ReviewDecisionResponse(review_item=item)
 
 
 def _require_task(task_id: str) -> AuditTask:

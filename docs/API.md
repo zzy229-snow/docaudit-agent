@@ -35,6 +35,9 @@ http://127.0.0.1:8102/docs
 | `GET` | `/api/v1/audit-tasks/{task_id}/risks` | 获取风险列表 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/trace` | 获取执行轨迹 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/summary` | 获取面向页面展示的可解释摘要 |
+| `GET` | `/api/v1/audit-tasks/{task_id}/review-items` | 获取人工复核项 |
+| `PATCH` | `/api/v1/audit-tasks/{task_id}/fields/{field_name}` | 提交字段人工修正 |
+| `POST` | `/api/v1/review-items/{review_item_id}/decision` | 提交人工复核决策 |
 
 ## 4. 状态流转
 
@@ -72,6 +75,8 @@ API 测试会覆盖：
 - 上传 `data/demo/normal` 三份样例并得到 `PASS`。
 - 上传 `data/demo/over_limit` 三份样例并得到 `REVIEW_REQUIRED`。
 - 查询字段、风险、执行轨迹和可解释摘要。
+- 对字段提交人工修正，重新运行审核并确认风险变化。
+- 对复核项提交决策并保留处理人。
 - 空任务运行被拒绝。
 - 不存在的任务返回 `404`。
 
@@ -96,7 +101,7 @@ API 测试会覆盖：
 
 - 任务存储在内存中，进程重启后任务丢失。
 - 尚未实现用户、角色和权限控制。
-- 尚未实现人工修正字段和人工复核决策接口。
+- 字段修正后的第一版实现采用全量重跑，尚未做依赖图局部重跑。
 - 尚未实现报告导出。
 - 尚未实现数据库查重、任务恢复和幂等请求 ID。
 
@@ -106,8 +111,7 @@ API 测试会覆盖：
 
 优先级建议：
 
-1. 增加人工复核接口：`POST /api/v1/review-items/{id}/decision`。
-2. 增加字段修正接口：`PATCH /api/v1/fields/{id}`。
-3. 将内存任务存储替换为 SQLite 或 PostgreSQL。
-4. 将 `trace` 拆成结构化节点轨迹与工具调用轨迹。
-5. 增加报告导出接口：`POST /api/v1/audit-tasks/{id}/report`。
+1. 将字段修正后的全量重跑升级为按依赖节点局部重跑。
+2. 将内存任务存储替换为 SQLite 或 PostgreSQL。
+3. 将 `trace` 拆成结构化节点轨迹与工具调用轨迹。
+4. 增加报告导出接口：`POST /api/v1/audit-tasks/{id}/report`。

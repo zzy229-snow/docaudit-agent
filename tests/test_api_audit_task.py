@@ -68,6 +68,56 @@ class AuditTaskApiTests(unittest.TestCase):
         self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in payload["risks"]))
         self.assertTrue(any(item["chunk_id"] == "TRAVEL-V1-4.2-A" for item in payload["policy_evidence"]))
 
+        review_items = self.client.get(f"/api/v1/audit-tasks/{task_id}/review-items")
+        self.assertEqual(review_items.status_code, 200)
+        self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in review_items.json()["review_items"]))
+
+    def test_field_correction_reruns_audit_and_clears_risk(self):
+        task_id = self.create_task()
+        self.upload_case(task_id, "over_limit")
+        self.client.post(f"/api/v1/audit-tasks/{task_id}/run")
+
+        correction = self.client.patch(
+            f"/api/v1/audit-tasks/{task_id}/fields/invoice_amount",
+            json={"value": "580.00", "reason": "人工核对酒店发票原图，金额应为580.00"},
+        )
+        self.assertEqual(correction.status_code, 200)
+        self.assertEqual(correction.json()["correction"]["original_value"], "680.00")
+        payment_correction = self.client.patch(
+            f"/api/v1/audit-tasks/{task_id}/fields/payment_amount",
+            json={"value": "580.00", "reason": "人工核对付款截图，金额应为580.00"},
+        )
+        self.assertEqual(payment_correction.status_code, 200)
+
+        rerun = self.client.post(f"/api/v1/audit-tasks/{task_id}/run")
+        self.assertEqual(rerun.status_code, 200)
+        self.assertEqual(rerun.json()["result_status"], "PASS")
+
+        risks = self.client.get(f"/api/v1/audit-tasks/{task_id}/risks")
+        self.assertEqual(risks.status_code, 200)
+        self.assertEqual(risks.json()["risks"], [])
+
+        fields = self.client.get(f"/api/v1/audit-tasks/{task_id}/fields")
+        self.assertEqual(fields.json()["fields"]["invoice_amount"]["value"], "580.00")
+
+        trace = self.client.get(f"/api/v1/audit-tasks/{task_id}/trace").json()["trace"]
+        self.assertTrue(any("字段invoice_amount已人工修正为580.00" in item for item in trace))
+
+    def test_review_item_decision_is_recorded(self):
+        task_id = self.create_task()
+        self.upload_case(task_id, "over_limit")
+        self.client.post(f"/api/v1/audit-tasks/{task_id}/run")
+        item = self.client.get(f"/api/v1/audit-tasks/{task_id}/review-items").json()["review_items"][0]
+
+        decision = self.client.post(
+            f"/api/v1/review-items/{item['review_item_id']}/decision",
+            json={"decision": "APPROVED", "decided_by": "finance-reviewer"},
+        )
+
+        self.assertEqual(decision.status_code, 200)
+        self.assertEqual(decision.json()["review_item"]["status"], "APPROVED")
+        self.assertEqual(decision.json()["review_item"]["decided_by"], "finance-reviewer")
+
     def test_running_empty_task_is_rejected(self):
         task_id = self.create_task()
 

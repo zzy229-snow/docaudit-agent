@@ -1,4 +1,5 @@
 from app.models.audit import AuditReport, RiskItem
+from app.models.field import ExtractedField
 from app.models.state import HumanReviewItem, finish_node, record_tool_call, start_node
 from app.parsers.loader import parse_document
 from app.extraction.field_extractor import extract_fields
@@ -16,6 +17,25 @@ def parse_documents(state: dict) -> dict:
 def extract(state: dict) -> dict:
     started_at = start_node(state, "extract", "开始抽取统一字段")
     fields = extract_fields(state["documents"])
+    for name, override in state.get("field_overrides", {}).items():
+        reason = override.get("reason", "人工修正")
+        value = override["value"]
+        if name in fields:
+            fields[name] = fields[name].model_copy(update={
+                "value": value,
+                "confidence": 1.0,
+                "source_text": f"人工修正：{reason}",
+            })
+        else:
+            fields[name] = ExtractedField(
+                name=name,
+                value=value,
+                confidence=1.0,
+                document_id="manual",
+                page_no=1,
+                source_text=f"人工补充：{reason}",
+            )
+        state.setdefault("trace", []).append(f"字段{name}已人工修正为{value}，原因：{reason}")
     finish_node(state, "extract", started_at, f"抽取{len(fields)}个字段")
     return {"fields": fields, "trace": state["trace"]}
 
