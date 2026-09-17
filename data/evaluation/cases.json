@@ -1,4 +1,34 @@
 [
-  {"case": "normal", "expected_status": "PASS", "expected_risks": []},
-  {"case": "over_limit", "expected_status": "REVIEW_REQUIRED", "expected_risks": ["HOTEL_LIMIT"]}
+  {
+    "case_id": "CASE_TRAVEL_NORMAL_001",
+    "name": "正常差旅住宿报销",
+    "documents_dir": "data/demo/normal",
+    "expected_status": "PASS",
+    "expected_risks": [],
+    "expected_fields": {
+      "invoice_amount": "580.00",
+      "payment_amount": "580.00",
+      "invoice_date": "2026-08-01",
+      "travel_city": "上海",
+      "travel_start_date": "2026-08-01",
+      "travel_end_date": "2026-08-02"
+    },
+    "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
+  },
+  {
+    "case_id": "CASE_TRAVEL_OVER_LIMIT_001",
+    "name": "住宿金额超标",
+    "documents_dir": "data/demo/over_limit",
+    "expected_status": "REVIEW_REQUIRED",
+    "expected_risks": ["HOTEL_LIMIT"],
+    "expected_fields": {
+      "invoice_amount": "680.00",
+      "payment_amount": "680.00",
+      "invoice_date": "2026-08-01",
+      "travel_city": "上海",
+      "travel_start_date": "2026-08-01",
+      "travel_end_date": "2026-08-02"
+    },
+    "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
+  }
 ]

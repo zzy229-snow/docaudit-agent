@@ -35,13 +35,22 @@ python -m uvicorn app.api.main:app --reload --port 8102
 python -m unittest discover -s tests -v
 ```
 
+## 评测基线
+
+```bash
+python -m app.evaluation.runner
+python -m app.evaluation.runner --format markdown
+```
+
+评测用例位于 `data/evaluation/cases.json`，会端到端检查最终状态、风险码、关键字段和制度引用。后续接入真实OCR、LLM或向量检索后，先跑这组评测确认准确率和稳定性没有下降。详细说明见 `docs/EVALUATION.md`。
+
 ## 目录
 
-`app/models` 是统一数据结构；`app/parsers` 解析文件；`app/extraction` 抽字段；`app/rag` 读取和匹配演示制度；`app/tools` 精确校验；`app/agent` 串联审核流程；`app/services` 预留模型API接口；`data` 为虚构样例和预期结果。
+`app/models` 是统一数据结构；`app/parsers` 解析文件；`app/extraction` 抽字段；`app/rag` 读取和匹配演示制度；`app/tools` 精确校验；`app/agent` 串联审核流程；`app/services` 预留模型API接口；`app/evaluation` 提供端到端评测；`data` 为虚构样例和预期结果。
 
 ## 当前限制
 
-此版是可解释的规则基线。OCR、多模态模型、向量检索、LangGraph运行时和交互式人工修正属于后续开发，不能将当前版本描述为已实现这些能力。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的规则基线。OCR、多模态模型、生产级向量检索、LangGraph运行时和完整交互式人工修正属于后续开发，不能将当前版本描述为已实现这些能力。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
 ## 推送到你的Gitee仓库
 
