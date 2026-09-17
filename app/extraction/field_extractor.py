@@ -1,6 +1,7 @@
 import re
 from app.models.document import Document
 from app.models.field import ExtractedField
+from app.extraction.llm_field_extractor import extract_fields_with_llm
 
 
 LABELS = {
@@ -28,4 +29,6 @@ def extract_fields(documents: list[Document]) -> dict[str, ExtractedField]:
                         value = value  # Decimal conversion happens inside Tools.
                     found[name] = ExtractedField(name=name, value=value, confidence=1.0,
                         document_id=doc.document_id, page_no=page.number, source_text=match.group(0))
+    for name, field in extract_fields_with_llm(documents).items():
+        found.setdefault(name, field)
     return found
