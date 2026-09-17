@@ -1,0 +1,4 @@
+[
+  {"case": "normal", "expected_status": "PASS", "expected_risks": []},
+  {"case": "over_limit", "expected_status": "REVIEW_REQUIRED", "expected_risks": ["HOTEL_LIMIT"]}
+]
