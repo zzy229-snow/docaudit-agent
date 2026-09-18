@@ -9,6 +9,8 @@ data/private/
 data/uploads/
 reports/
 *.db
+*.sqlite3
+data/runtime/
 
 # IDE
 .idea/
