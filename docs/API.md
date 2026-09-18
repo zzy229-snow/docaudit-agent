@@ -2,9 +2,9 @@
 
 ## 1. 目标
 
-本 API 是 Agent 与系统工程方向的第三阶段交付，用于把现有审核工作流暴露为可联调的 HTTP 接口。
+本 API 用于把审核 Agent 工作流暴露为可联调、可恢复、可追踪的 HTTP 服务。
 
-当前版本使用内存任务存储，适合本地开发、接口联调和演示，不适合作为生产持久化方案。后续可以将 `app/api/store.py` 替换为 SQLite、PostgreSQL 或 LangGraph Checkpoint。
+当前版本默认使用本地 SQLite 存储任务、上传材料、审核报告、字段修正、人工复核项和审计事件。它仍不是完整生产系统，但已经避免了“服务重启后任务丢失”的玩具化问题。后续可以把 `app/api/store.py` 的实现替换为 PostgreSQL 或 LangGraph Checkpoint。
 
 ## 2. 启动方式
 
@@ -28,6 +28,7 @@ http://127.0.0.1:8102/docs
 | --- | --- | --- |
 | `GET` | `/health` | 健康检查 |
 | `POST` | `/api/v1/audit-tasks` | 创建审核任务 |
+| `GET` | `/api/v1/audit-tasks` | 查询审核任务列表 |
 | `POST` | `/api/v1/audit-tasks/{task_id}/documents` | 上传单份材料 |
 | `POST` | `/api/v1/audit-tasks/{task_id}/run` | 运行审核 |
 | `GET` | `/api/v1/audit-tasks/{task_id}` | 获取任务概要 |
@@ -36,10 +37,37 @@ http://127.0.0.1:8102/docs
 | `GET` | `/api/v1/audit-tasks/{task_id}/trace` | 获取执行轨迹 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/summary` | 获取面向页面展示的可解释摘要 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/review-items` | 获取人工复核项 |
+| `GET` | `/api/v1/audit-tasks/{task_id}/events` | 获取任务生命周期事件 |
 | `PATCH` | `/api/v1/audit-tasks/{task_id}/fields/{field_name}` | 提交字段人工修正 |
 | `POST` | `/api/v1/review-items/{review_item_id}/decision` | 提交人工复核决策 |
 
-## 4. 状态流转
+## 4. 任务存储
+
+默认配置：
+
+```text
+AUDIT_TASK_STORE=sqlite
+AUDIT_TASK_DB=data/runtime/audit_tasks.sqlite3
+```
+
+如果没有配置 `AUDIT_TASK_DB`，系统会自动使用仓库根目录下的 `data/runtime/audit_tasks.sqlite3`。本地调试时如果希望回到无状态模式，可以设置：
+
+```text
+AUDIT_TASK_STORE=memory
+```
+
+SQLite 当前持久化内容：
+
+| 数据 | 说明 |
+| --- | --- |
+| 任务概要 | `task_id`、状态、创建时间、更新时间、错误信息 |
+| 上传材料 | 文件名和文件二进制内容 |
+| 审核报告 | 字段、风险、制度证据、检查结果、执行轨迹 |
+| 字段修正 | 原值、新值、修正原因、时间 |
+| 复核项 | 风险类型、处理状态、处理人 |
+| 审计事件 | 任务创建、材料上传、审核完成、字段修正、复核决策等 |
+
+## 5. 状态流转
 
 ```text
 CREATED -> READY -> COMPLETED
@@ -55,7 +83,7 @@ CREATED -> READY -> COMPLETED
 | `COMPLETED` | 审核完成，可以查询字段、风险和轨迹 |
 | `FAILED` | 审核运行失败，任务概要中会返回 `error` |
 
-## 5. 本地测试
+## 6. 本地测试
 
 运行完整测试：
 
@@ -75,12 +103,14 @@ API 测试会覆盖：
 - 上传 `data/demo/normal` 三份样例并得到 `PASS`。
 - 上传 `data/demo/over_limit` 三份样例并得到 `REVIEW_REQUIRED`。
 - 查询字段、风险、执行轨迹和可解释摘要。
+- 查询任务列表和任务生命周期事件。
 - 对字段提交人工修正，重新运行审核并确认风险变化。
 - 对复核项提交决策并保留处理人。
+- SQLite 存储跨实例重建后仍能读取任务、文件、报告和事件。
 - 空任务运行被拒绝。
 - 不存在的任务返回 `404`。
 
-## 6. 可解释摘要
+## 7. 可解释摘要
 
 `GET /api/v1/audit-tasks/{task_id}/summary` 返回面向前端展示的结构化摘要，适合直接渲染审核结果页。
 
@@ -97,21 +127,21 @@ API 测试会覆盖：
 | `policy_evidence` | 制度条款引用 |
 | `trace` | Agent 执行轨迹 |
 
-## 7. 当前限制
+## 8. 当前限制
 
-- 任务存储在内存中，进程重启后任务丢失。
+- 当前 SQLite 是本地单机持久化，不适合作为多实例部署的共享数据库。
 - 尚未实现用户、角色和权限控制。
 - 字段修正后的第一版实现采用全量重跑，尚未做依赖图局部重跑。
 - 尚未实现报告导出。
-- 尚未实现数据库查重、任务恢复和幂等请求 ID。
+- 尚未实现幂等请求 ID、文件去重和任务恢复锁。
 
-这些限制是有意保留的 MVP 边界，避免在 Agent 主线尚未稳定时过早引入数据库和权限复杂度。
+这些限制是当前生产化改造的下一批边界，不应在对外说明中夸大。
 
-## 8. 后续建议
+## 9. 后续建议
 
 优先级建议：
 
 1. 将字段修正后的全量重跑升级为按依赖节点局部重跑。
-2. 将内存任务存储替换为 SQLite 或 PostgreSQL。
+2. 将 SQLite 存储替换为 PostgreSQL，并增加 Alembic 迁移。
 3. 将 `trace` 拆成结构化节点轨迹与工具调用轨迹。
 4. 增加报告导出接口：`POST /api/v1/audit-tasks/{id}/report`。

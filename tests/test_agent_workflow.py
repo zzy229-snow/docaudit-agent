@@ -19,6 +19,7 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertIn("tool_calls=6", result.trace)
         self.assertIn("human_review_items=0", result.trace)
         self.assertTrue(any(item.startswith("parse_documents: 解析3份材料") for item in result.trace))
+        self.assertTrue(any(item.startswith("llm_extraction:") for item in result.trace))
 
     def test_review_case_counts_human_review_items(self):
         result = run_audit(self.load_files("over_limit"))

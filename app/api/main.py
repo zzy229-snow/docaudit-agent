@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.agent.graph import run_audit
-from app.api.store import AuditTask, FieldCorrection, ReviewItem, ReviewStatus, task_store
+from app.api.store import AuditEvent, AuditTask, FieldCorrection, ReviewItem, ReviewStatus, task_store
 from app.models.audit import CheckResult, RiskItem
 from app.models.field import ExtractedField
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
@@ -21,6 +21,10 @@ class TaskSummary(BaseModel):
     updated_at: str
     error: str | None = None
     result_status: str | None = None
+
+
+class TaskListResponse(BaseModel):
+    tasks: list[TaskSummary]
 
 
 class UploadResponse(TaskSummary):
@@ -67,6 +71,11 @@ class ReviewItemsResponse(BaseModel):
     review_items: list[ReviewItem]
 
 
+class TaskEventsResponse(BaseModel):
+    task_id: str
+    events: list[AuditEvent]
+
+
 class ReviewDecisionRequest(BaseModel):
     decision: ReviewStatus
     decided_by: str | None = None
@@ -84,6 +93,11 @@ def health() -> dict[str, str]:
 @app.post("/api/v1/audit-tasks", response_model=TaskSummary, status_code=status.HTTP_201_CREATED)
 def create_audit_task() -> TaskSummary:
     return _task_summary(task_store.create_task())
+
+
+@app.get("/api/v1/audit-tasks", response_model=TaskListResponse)
+def list_audit_tasks() -> TaskListResponse:
+    return TaskListResponse(tasks=[_task_summary(task) for task in task_store.list_tasks()])
 
 
 @app.post("/api/v1/audit-tasks/{task_id}/documents", response_model=UploadResponse)
@@ -146,6 +160,12 @@ def get_summary(task_id: str) -> SummaryResponse:
 def get_review_items(task_id: str) -> ReviewItemsResponse:
     task = _require_task(task_id)
     return ReviewItemsResponse(task_id=task.task_id, review_items=task.review_items)
+
+
+@app.get("/api/v1/audit-tasks/{task_id}/events", response_model=TaskEventsResponse)
+def get_task_events(task_id: str) -> TaskEventsResponse:
+    _require_task(task_id)
+    return TaskEventsResponse(task_id=task_id, events=task_store.list_events(task_id))
 
 
 @app.patch("/api/v1/audit-tasks/{task_id}/fields/{field_name}", response_model=FieldCorrectionResponse)

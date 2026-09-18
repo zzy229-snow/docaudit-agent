@@ -60,6 +60,7 @@ class AuditTaskApiTests(unittest.TestCase):
         risks = self.client.get(f"/api/v1/audit-tasks/{task_id}/risks")
         self.assertEqual(risks.status_code, 200)
         self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in risks.json()["risks"]))
+        self.assertTrue(any(item["risk_type"] == "APPLICANT_MATCH" for item in risks.json()["risks"]))
 
         summary = self.client.get(f"/api/v1/audit-tasks/{task_id}/summary")
         self.assertEqual(summary.status_code, 200)
@@ -71,6 +72,7 @@ class AuditTaskApiTests(unittest.TestCase):
         review_items = self.client.get(f"/api/v1/audit-tasks/{task_id}/review-items")
         self.assertEqual(review_items.status_code, 200)
         self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in review_items.json()["review_items"]))
+        self.assertTrue(any(item["risk_type"] == "APPLICANT_MATCH" for item in review_items.json()["review_items"]))
 
     def test_field_correction_reruns_audit_and_clears_risk(self):
         task_id = self.create_task()
@@ -90,7 +92,7 @@ class AuditTaskApiTests(unittest.TestCase):
         self.assertEqual(payment_correction.status_code, 200)
         buyer_correction = self.client.patch(
             f"/api/v1/audit-tasks/{task_id}/fields/invoice_buyer",
-            json={"value": "张三", "reason": "人工核对发票抬头，购买方为申请人本人"},
+            json={"value": "张三", "reason": "人工核对发票抬头，购买方应为张三"},
         )
         self.assertEqual(buyer_correction.status_code, 200)
 
@@ -122,6 +124,26 @@ class AuditTaskApiTests(unittest.TestCase):
         self.assertEqual(decision.status_code, 200)
         self.assertEqual(decision.json()["review_item"]["status"], "APPROVED")
         self.assertEqual(decision.json()["review_item"]["decided_by"], "finance-reviewer")
+
+        events = self.client.get(f"/api/v1/audit-tasks/{task_id}/events")
+        self.assertEqual(events.status_code, 200)
+        self.assertTrue(any(item["event_type"] == "REVIEW_DECIDED" for item in events.json()["events"]))
+
+    def test_task_list_and_events_show_audit_lifecycle(self):
+        task_id = self.create_task()
+        self.upload_case(task_id, "normal")
+        self.client.post(f"/api/v1/audit-tasks/{task_id}/run")
+
+        tasks = self.client.get("/api/v1/audit-tasks")
+        self.assertEqual(tasks.status_code, 200)
+        self.assertTrue(any(item["task_id"] == task_id for item in tasks.json()["tasks"]))
+
+        events = self.client.get(f"/api/v1/audit-tasks/{task_id}/events")
+        self.assertEqual(events.status_code, 200)
+        event_types = [item["event_type"] for item in events.json()["events"]]
+        self.assertIn("TASK_CREATED", event_types)
+        self.assertIn("DOCUMENT_UPLOADED", event_types)
+        self.assertIn("AUDIT_COMPLETED", event_types)
 
     def test_running_empty_task_is_rejected(self):
         task_id = self.create_task()

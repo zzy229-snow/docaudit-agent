@@ -1,6 +1,8 @@
 # DocAudit Agent
 
-企业报销材料审核项目的首个可运行版本。上传电子PDF、TXT、DOCX、XLSX材料，提取明确标注的字段，检索演示制度并运行四项确定性检查。图片及扫描PDF尚未接入OCR，会明确报错；当前不需要GPU或模型API。
+企业报销材料审核项目的稳定演示版。上传电子PDF、TXT、DOCX、XLSX、图片材料，系统会解析文本或走 OCR 路由，提取明确标注的字段，检索演示制度并运行五项确定性检查。默认不需要GPU或模型API；生产化演示应将 OCR、LLM 和 RAG 从 mock 模式切到真实服务。
+
+当前稳定演示版适合演示、评审和本地联调；不应描述为生产级财务系统。
 
 ## 运行环境
 
@@ -15,7 +17,9 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
+打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元、发票购买方与申请人不一致和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
+
+Streamlit 页面已升级为审核工作台形态：左侧可创建 5 组虚构样例任务，主界面包含任务中心、新建审核、审核详情、风险看板、字段证据、人工复核、事件时间线和 JSON 审核包下载。
 
 ## FastAPI接口
 
@@ -23,7 +27,39 @@ streamlit run streamlit_app.py
 python -m uvicorn app.api.main:app --reload --port 8102
 ```
 
-接口文档地址：`http://127.0.0.1:8102/docs`。当前API使用内存任务存储，支持创建任务、上传材料、运行审核，以及查询字段、风险、执行轨迹和可解释摘要。详细说明见 `docs/API.md`。
+接口文档地址：`http://127.0.0.1:8102/docs`。当前API默认使用本地 SQLite 任务存储，数据落在 `data/runtime/audit_tasks.sqlite3`，支持创建任务、上传材料、运行审核、任务列表、生命周期事件、字段修正、人工复核决策，以及查询字段、风险、执行轨迹和可解释摘要。详细说明见 `docs/API.md`。
+
+## 已完成能力
+
+- 五项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性。
+- 可解释报告：风险原因、字段证据、制度依据、检查项状态、Agent trace。
+- Streamlit 演示页：内置 5 组虚构样例，支持 JSON 报告下载。
+- FastAPI 任务接口：创建任务、上传材料、运行审核、字段修正、人工复核决策。
+- 生产化任务基础：SQLite 持久化任务、材料、报告、人工修正、复核项和审计事件。
+- LLM 接入护栏：JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。
+- 评测基线：5 条端到端样例，可输出 JSON/Markdown 报告。
+
+## 模型API
+
+默认使用 `MODEL_PROVIDER=mock`，不需要API Key。真实模型接入通过 `app/services/model_gateway.py` 统一管理，字段抽取Prompt位于 `app/prompts/field_extraction_v1.txt`。LLM 字段抽取已加入 JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。配置说明见 `docs/MODEL_GATEWAY.md`，稳定性护栏说明见 `docs/LLM_ROBUSTNESS.md`。
+
+购买真实API前，先复制 `.env.example` 为 `.env`。项目会自动读取仓库根目录下的 `.env`，但 `.env` 已被 `.gitignore` 排除，不要提交密钥。然后运行连通性检查：
+
+```bash
+python -m app.services.model_smoke
+```
+
+真实模型 API 购买和接入步骤见 `docs/MODEL_API_READINESS.md`。
+
+## 真实 OCR
+
+默认 `OCR_ENGINE=mock` 只适合本地测试。生产化演示可以切换为：
+
+- `OCR_ENGINE=tesseract`：本机 Tesseract OCR；
+- `OCR_ENGINE=http`：百度/阿里/腾讯/自研 OCR HTTP 服务；
+- `OCR_ENGINE=mineru`：扫描 PDF 和复杂版面解析。
+
+配置方式见 `docs/OCR_INTEGRATION.md`。
 
 ## 测试
 
@@ -31,25 +67,28 @@ python -m uvicorn app.api.main:app --reload --port 8102
 python -m unittest discover -s tests -v
 ```
 
+## 评测基线
+
+```bash
+python -m app.evaluation.runner
+python -m app.evaluation.runner --format markdown
+python -m app.evaluation.runner --format markdown --output reports/eval-report.md
+```
+
+评测用例位于 `data/evaluation/cases.json`，会端到端检查最终状态、风险码、关键字段和制度引用。后续接入真实OCR、LLM或向量检索后，先跑这组评测确认准确率和稳定性没有下降。详细说明见 `docs/EVALUATION.md`。
+
 ## 目录
 
-`app/models` 是统一数据结构；`app/parsers` 解析文件；`app/extraction` 抽字段；`app/rag` 读取和匹配演示制度；`app/tools` 精确校验；`app/agent` 串联审核流程；`app/services` 预留模型API接口；`data` 为虚构样例和预期结果。
+`app/models` 是统一数据结构；`app/parsers` 解析文件；`app/extraction` 抽字段；`app/rag` 读取和匹配演示制度；`app/tools` 精确校验；`app/agent` 串联审核流程；`app/services` 预留模型API接口；`app/evaluation` 提供端到端评测；`data` 为虚构样例和预期结果。
 
 ## 当前限制
 
-此版是可解释的规则基线。OCR、多模态模型、向量检索、LangGraph运行时和交互式人工修正属于后续开发，不能将当前版本描述为已实现这些能力。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；多模态模型、生产级向量检索、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
-## 推送到你的Gitee仓库
+## 演示与发布
 
-下载压缩包、解压后，在 `docaudit-agent` 目录打开终端：
+演示步骤见 `docs/DEMO_GUIDE.md`。合并到 `main` 前的检查清单见 `docs/RELEASE_CHECKLIST.md`。
 
-```bash
-git init
-git add .
-git commit -m "feat: initial runnable audit baseline"
-git branch -M main
-git remote add origin https://gitee.com/zzy229-snow/docaudit_-agent.git
-git push -u origin main
-```
+## 演示材料
 
-如果仓库创建时已初始化README，应先克隆仓库，再将解压的项目文件复制进去并提交，以免推送时遇到不同历史。密钥只保存在本地 `.env`，不要提交仓库。
+演示与说明文档见 `docs/DEMO_GUIDE.md`。
