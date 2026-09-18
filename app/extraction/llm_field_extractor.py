@@ -1,3 +1,7 @@
+from datetime import date
+from decimal import Decimal, InvalidOperation
+import os
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError
@@ -30,31 +34,125 @@ class LlmFieldExtractionResult(BaseModel):
     fields: dict[str, LlmFieldCandidate]
 
 
+class LlmExtractionDiagnostics(BaseModel):
+    attempts: int = 0
+    accepted_fields: list[str] = Field(default_factory=list)
+    rejected_fields: dict[str, str] = Field(default_factory=dict)
+    errors: list[str] = Field(default_factory=list)
+    fallback_used: bool = False
+
+
+class LlmExtractionOutcome(BaseModel):
+    fields: dict[str, ExtractedField]
+    diagnostics: LlmExtractionDiagnostics
+
+
 def extract_fields_with_llm(documents: list[Document], gateway: ModelGateway | None = None) -> dict[str, ExtractedField]:
+    return extract_fields_with_llm_diagnostics(documents, gateway=gateway).fields
+
+
+def extract_fields_with_llm_diagnostics(
+    documents: list[Document],
+    gateway: ModelGateway | None = None,
+) -> LlmExtractionOutcome:
     gateway = gateway or ModelGateway()
+    diagnostics = LlmExtractionDiagnostics()
     if gateway.provider == "mock":
-        return {}
+        diagnostics.fallback_used = True
+        diagnostics.errors.append("MODEL_PROVIDER=mock, skip LLM extraction")
+        return LlmExtractionOutcome(fields={}, diagnostics=diagnostics)
     prompt = _load_prompt()
     content = _document_context(documents)
-    try:
-        payload = gateway.complete_json(prompt, content)
-        parsed = LlmFieldExtractionResult.model_validate(payload)
-    except (ModelGatewayError, ValidationError, ValueError):
-        return {}
+    parsed: LlmFieldExtractionResult | None = None
+    for attempt in range(1, _max_attempts() + 1):
+        diagnostics.attempts = attempt
+        try:
+            payload = gateway.complete_json(_prompt_for_attempt(prompt, attempt), content)
+            parsed = LlmFieldExtractionResult.model_validate(payload)
+            break
+        except (ModelGatewayError, ValidationError, ValueError) as exc:
+            diagnostics.errors.append(f"attempt_{attempt}: {exc}")
+    if parsed is None:
+        diagnostics.fallback_used = True
+        return LlmExtractionOutcome(fields={}, diagnostics=diagnostics)
+
     extracted: dict[str, ExtractedField] = {}
     doc_id = documents[0].document_id if documents else "llm"
     for name, candidate in parsed.fields.items():
-        if name not in FIELD_NAMES or candidate.value in (None, ""):
+        normalized, reject_reason = _normalize_candidate(name, candidate, content)
+        if reject_reason:
+            diagnostics.rejected_fields[name] = reject_reason
             continue
+        assert normalized is not None
         extracted[name] = ExtractedField(
             name=name,
-            value=candidate.value,
+            value=normalized,
             confidence=candidate.confidence,
             document_id=doc_id,
             page_no=candidate.page_no,
             source_text=candidate.source_text,
         )
-    return extracted
+        diagnostics.accepted_fields.append(name)
+    if not extracted:
+        diagnostics.fallback_used = True
+    return LlmExtractionOutcome(fields=extracted, diagnostics=diagnostics)
+
+
+def _normalize_candidate(name: str, candidate: LlmFieldCandidate, document_context: str) -> tuple[str | None, str | None]:
+    if name not in FIELD_NAMES:
+        return None, "unknown field"
+    if candidate.value in (None, ""):
+        return None, "empty value"
+    if candidate.confidence < _min_confidence():
+        return None, f"low confidence {candidate.confidence}"
+    if not candidate.source_text:
+        return None, "missing source_text"
+    if candidate.source_text not in document_context:
+        return None, "source_text not found in documents"
+
+    raw = str(candidate.value).strip()
+    if name.endswith("_amount"):
+        return _normalize_amount(raw)
+    if name.endswith("_date"):
+        return _normalize_date(raw)
+    if name == "travel_city":
+        city = raw.strip()
+        if not re.fullmatch(r"[\u4e00-\u9fff]{2,8}市?", city):
+            return None, "invalid city format"
+        return city, None
+    if name == "invoice_number":
+        if not re.fullmatch(r"[A-Za-z0-9-]{5,32}", raw):
+            return None, "invalid invoice number format"
+        return raw, None
+    if name == "applicant_name":
+        if not re.fullmatch(r"[\u4e00-\u9fff]{2,5}", raw):
+            return None, "invalid applicant name format"
+        return raw, None
+    return raw, None
+
+
+def _normalize_amount(value: str) -> tuple[str | None, str | None]:
+    text = value.replace("￥", "").replace("¥", "").replace("元", "").replace(",", "").strip()
+    try:
+        amount = Decimal(text)
+    except InvalidOperation:
+        return None, "invalid amount format"
+    if amount < 0:
+        return None, "negative amount"
+    return f"{amount:.2f}", None
+
+
+def _normalize_date(value: str) -> tuple[str | None, str | None]:
+    text = value.strip().replace("年", "-").replace("月", "-").replace("日", "")
+    text = text.replace("/", "-").replace(".", "-")
+    match = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", text)
+    if not match:
+        return None, "invalid date format"
+    year, month, day = (int(part) for part in match.groups())
+    try:
+        return date(year, month, day).isoformat(), None
+    except ValueError:
+        return None, "invalid date value"
 
 
 def _document_context(documents: list[Document]) -> str:
@@ -69,3 +167,29 @@ def _load_prompt() -> str:
     from pathlib import Path
 
     return (Path(__file__).resolve().parents[1] / "prompts" / "field_extraction_v1.txt").read_text(encoding="utf-8")
+
+
+def _max_attempts() -> int:
+    raw = os.getenv("MODEL_EXTRACTION_MAX_ATTEMPTS", "2")
+    try:
+        return max(1, min(5, int(raw)))
+    except ValueError:
+        return 2
+
+
+def _min_confidence() -> float:
+    raw = os.getenv("MODEL_EXTRACTION_MIN_CONFIDENCE", "0.7")
+    try:
+        return max(0.0, min(1.0, float(raw)))
+    except ValueError:
+        return 0.7
+
+
+def _prompt_for_attempt(prompt: str, attempt: int) -> str:
+    if attempt == 1:
+        return prompt
+    return (
+        f"{prompt}\n\n"
+        "上一次输出未通过系统校验。请重新输出严格 JSON 对象：顶层只能包含 fields；"
+        "字段名只能来自 Schema；不要 Markdown；不要解释；没有原文证据必须返回 null。"
+    )

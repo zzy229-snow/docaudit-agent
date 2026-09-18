@@ -2,7 +2,7 @@ from app.models.audit import AuditReport, RiskItem
 from app.models.field import ExtractedField
 from app.models.state import HumanReviewItem, finish_node, record_tool_call, start_node
 from app.parsers.loader import parse_document
-from app.extraction.field_extractor import extract_fields
+from app.extraction.field_extractor import extract_fields_with_diagnostics
 from app.rag.retriever import retrieve_policy
 from app.tools.registry import get_tool
 
@@ -16,7 +16,17 @@ def parse_documents(state: dict) -> dict:
 
 def extract(state: dict) -> dict:
     started_at = start_node(state, "extract", "开始抽取统一字段")
-    fields = extract_fields(state["documents"])
+    outcome = extract_fields_with_diagnostics(state["documents"])
+    fields = outcome.fields
+    if outcome.llm_diagnostics:
+        diag = outcome.llm_diagnostics
+        state.setdefault("trace", []).append(
+            "llm_extraction: "
+            f"attempts={diag.attempts}, "
+            f"accepted={len(diag.accepted_fields)}, "
+            f"rejected={len(diag.rejected_fields)}, "
+            f"fallback_used={diag.fallback_used}"
+        )
     for name, override in state.get("field_overrides", {}).items():
         reason = override.get("reason", "人工修正")
         value = override["value"]

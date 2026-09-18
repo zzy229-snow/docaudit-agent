@@ -1,7 +1,9 @@
 import re
+from pydantic import BaseModel
+
 from app.models.document import Document
 from app.models.field import ExtractedField
-from app.extraction.llm_field_extractor import extract_fields_with_llm
+from app.extraction.llm_field_extractor import LlmExtractionDiagnostics, extract_fields_with_llm_diagnostics
 
 
 LABELS = {
@@ -16,7 +18,16 @@ LABELS = {
 }
 
 
+class FieldExtractionOutcome(BaseModel):
+    fields: dict[str, ExtractedField]
+    llm_diagnostics: LlmExtractionDiagnostics | None = None
+
+
 def extract_fields(documents: list[Document]) -> dict[str, ExtractedField]:
+    return extract_fields_with_diagnostics(documents).fields
+
+
+def extract_fields_with_diagnostics(documents: list[Document]) -> FieldExtractionOutcome:
     """Deterministic baseline; values are only taken from explicit labels."""
     found: dict[str, ExtractedField] = {}
     for doc in documents:
@@ -29,6 +40,7 @@ def extract_fields(documents: list[Document]) -> dict[str, ExtractedField]:
                         value = value  # Decimal conversion happens inside Tools.
                     found[name] = ExtractedField(name=name, value=value, confidence=1.0,
                         document_id=doc.document_id, page_no=page.number, source_text=match.group(0))
-    for name, field in extract_fields_with_llm(documents).items():
+    llm_outcome = extract_fields_with_llm_diagnostics(documents)
+    for name, field in llm_outcome.fields.items():
         found.setdefault(name, field)
-    return found
+    return FieldExtractionOutcome(fields=found, llm_diagnostics=llm_outcome.diagnostics)
