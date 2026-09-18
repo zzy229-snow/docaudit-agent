@@ -20,6 +20,8 @@
 MODEL_PROVIDER=mock
 ```
 
+项目启动时会自动读取仓库根目录下的 `.env`；真实密钥应只放在本地 `.env`，不要提交仓库。
+
 OpenAI-compatible API 配置：
 
 ```env

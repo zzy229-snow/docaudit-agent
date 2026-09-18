@@ -19,6 +19,10 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from app.config import load_environment
+
+load_environment()
+
 # PRD §6.2: 电子PDF文本密度过低时转扫描件路径的阈值(全页合计字符数)。
 # 扫描件=0字符;演示发票≈40字符;真实电子PDF通常数百字符。默认20可容纳最短的有效文本。
 DEFAULT_TEXT_DENSITY = int(os.environ.get("OCR_TEXT_DENSITY", "20"))

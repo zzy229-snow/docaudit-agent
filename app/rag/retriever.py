@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import os
 
+from app.config import load_environment
 from app.models.audit import PolicyEvidence
 from .indexer import load_policy
+
+load_environment()
 
 RAG_MODE = os.environ.get("RAG_MODE", "mock").strip().lower()
 
