@@ -77,3 +77,7 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 ## 演示与发布
 
 演示步骤见 `docs/DEMO_GUIDE.md`。合并到 `main` 前的检查清单见 `docs/RELEASE_CHECKLIST.md`。
+
+## 演示材料
+
+演示与说明文档见 `docs/DEMO_GUIDE.md`。
