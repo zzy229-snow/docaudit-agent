@@ -81,6 +81,14 @@ def check(state: dict) -> dict:
             },
         ),
         ("hotel_limit", {"invoice_amount": get("invoice_amount"), "policy_evidence": state["policy_evidence"]}),
+        (
+            "applicant_match",
+            {
+                "applicant_name": get("applicant_name"),
+                "invoice_buyer": get("invoice_buyer"),
+                "payment_party": get("payment_party"),
+            },
+        ),
     ]
     executions = [get_tool(name).execute(**kwargs) for name, kwargs in tool_inputs]
     results = [execution.result for execution in executions]
@@ -102,7 +110,7 @@ def check(state: dict) -> dict:
                 evidence_refs=result.evidence_refs,
                 policy_refs=[e.chunk_id for e in state["policy_evidence"]] if result.name == "hotel_limit" else []))
             human_review_items.append(HumanReviewItem(reason=result.detail, evidence_refs=result.evidence_refs))
-    finish_node(state, "check", started_at, "执行4项确定性检查")
+    finish_node(state, "check", started_at, "执行5项确定性检查")
     return {"checks": results, "risks": risks, "human_review_items": human_review_items, "trace": state["trace"]}
 
 

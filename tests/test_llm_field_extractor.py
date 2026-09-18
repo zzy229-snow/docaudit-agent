@@ -24,6 +24,12 @@ class FakeGateway:
                     "source_text": "发票金额：999.00",
                     "page_no": 1,
                 },
+                "invoice_buyer": {
+                    "value": "测试公司",
+                    "confidence": 0.9,
+                    "source_text": "购买方：测试公司",
+                    "page_no": 1,
+                },
             }
         }
 
@@ -87,13 +93,14 @@ class UnsafeGateway:
 class LlmFieldExtractorTests(unittest.TestCase):
     def test_llm_extractor_validates_candidates(self):
         doc = Document(document_id="doc1", file_name="sample.txt", document_type="text", pages=[
-            Page(number=1, text="报销人：李四")
+            Page(number=1, text="报销人：李四\n购买方：测试公司")
         ])
 
         fields = extract_fields_with_llm([doc], gateway=FakeGateway())
 
         self.assertEqual(fields["applicant_name"].value, "李四")
         self.assertEqual(fields["applicant_name"].confidence, 0.91)
+        self.assertEqual(fields["invoice_buyer"].value, "测试公司")
 
     def test_llm_extractor_retries_and_normalizes_values(self):
         doc = Document(document_id="doc1", file_name="sample.txt", document_type="text", pages=[

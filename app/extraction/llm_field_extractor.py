@@ -20,6 +20,8 @@ FIELD_NAMES = {
     "travel_city",
     "invoice_number",
     "applicant_name",
+    "invoice_buyer",
+    "payment_party",
 }
 
 
@@ -127,6 +129,10 @@ def _normalize_candidate(name: str, candidate: LlmFieldCandidate, document_conte
     if name == "applicant_name":
         if not re.fullmatch(r"[\u4e00-\u9fff]{2,5}", raw):
             return None, "invalid applicant name format"
+        return raw, None
+    if name in {"invoice_buyer", "payment_party"}:
+        if not re.fullmatch(r"[\u4e00-\u9fffA-Za-z0-9（）()·\-]{2,32}", raw):
+            return None, f"invalid {name} format"
         return raw, None
     return raw, None
 

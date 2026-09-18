@@ -28,7 +28,7 @@ parse_documents -> extract -> retrieve -> check -> report
 | `parse_documents` | 解析上传文件 | 调用 `app.parsers.loader.parse_document` |
 | `extract` | 抽取统一字段 | 调用 `app.extraction.field_extractor.extract_fields` |
 | `retrieve` | 检索制度证据 | 调用 `app.rag.retriever.retrieve_policy` |
-| `check` | 执行业务工具 | 调用材料、金额、日期、住宿上限检查 |
+| `check` | 执行业务工具 | 调用材料、金额、日期、住宿上限和主体一致性检查 |
 | `report` | 生成结构化报告 | 返回 `AuditReport` |
 
 固定流程的好处是稳定、可复现，适合作为财务审核类 Agent 的主干。LangGraph 后续可以承载状态迁移和条件边，但不应一开始就把所有业务判断交给自由 ReAct 循环。
@@ -61,7 +61,7 @@ parse_documents -> extract -> retrieve -> check -> report
    parse_documents: 解析3份材料 (12.34ms)
    extract: 抽取8个字段 (1.23ms)
    retrieve: 检索到1条制度 (0.42ms)
-   check: 执行4项确定性检查 (2.10ms)
+   check: 执行5项确定性检查 (2.10ms)
    ```
 
 2. 工具调用记录
@@ -73,13 +73,14 @@ parse_documents -> extract -> retrieve -> check -> report
    - `amount_match`
    - `date_range`
    - `hotel_limit`
+   - `applicant_match`
 
 报告 trace 末尾会追加运行摘要：
 
 ```text
 task_id=audit-xxxxxxxxxxxx
 steps=5/10
-tool_calls=5
+tool_calls=6
 human_review_items=0
 ```
 
@@ -173,6 +174,7 @@ pip install -r requirements.txt
 | `amount_match` | `amount` | 检查发票金额和付款金额是否一致 |
 | `date_range` | `date` | 检查发票日期是否位于出差日期范围内 |
 | `hotel_limit` | `policy` | 基于制度证据检查住宿金额是否超标 |
+| `applicant_match` | `document` | 检查申请人、发票购买方和付款收款方是否一致 |
 
 每个工具包含：
 
@@ -194,7 +196,7 @@ pip install -r requirements.txt
 
 | 测试 | 验证点 |
 | --- | --- |
-| `test_registry_contains_core_audit_tools` | 四个核心审核工具已注册且默认幂等 |
+| `test_registry_contains_core_audit_tools` | 五个核心审核工具已注册且默认幂等 |
 | `test_amount_tool_executes_through_registry` | 金额工具可以通过注册表执行并保留输入摘要 |
 | `test_hotel_limit_tool_keeps_policy_evidence_summary` | 制度工具可以处理证据列表并保留证据引用 |
 | `test_unknown_tool_is_rejected` | 未注册工具会被拒绝 |

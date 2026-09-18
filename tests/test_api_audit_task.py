@@ -60,6 +60,7 @@ class AuditTaskApiTests(unittest.TestCase):
         risks = self.client.get(f"/api/v1/audit-tasks/{task_id}/risks")
         self.assertEqual(risks.status_code, 200)
         self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in risks.json()["risks"]))
+        self.assertTrue(any(item["risk_type"] == "APPLICANT_MATCH" for item in risks.json()["risks"]))
 
         summary = self.client.get(f"/api/v1/audit-tasks/{task_id}/summary")
         self.assertEqual(summary.status_code, 200)
@@ -71,6 +72,7 @@ class AuditTaskApiTests(unittest.TestCase):
         review_items = self.client.get(f"/api/v1/audit-tasks/{task_id}/review-items")
         self.assertEqual(review_items.status_code, 200)
         self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in review_items.json()["review_items"]))
+        self.assertTrue(any(item["risk_type"] == "APPLICANT_MATCH" for item in review_items.json()["review_items"]))
 
     def test_field_correction_reruns_audit_and_clears_risk(self):
         task_id = self.create_task()
@@ -88,6 +90,11 @@ class AuditTaskApiTests(unittest.TestCase):
             json={"value": "580.00", "reason": "人工核对付款截图，金额应为580.00"},
         )
         self.assertEqual(payment_correction.status_code, 200)
+        buyer_correction = self.client.patch(
+            f"/api/v1/audit-tasks/{task_id}/fields/invoice_buyer",
+            json={"value": "张三", "reason": "人工核对发票抬头，购买方应为张三"},
+        )
+        self.assertEqual(buyer_correction.status_code, 200)
 
         rerun = self.client.post(f"/api/v1/audit-tasks/{task_id}/run")
         self.assertEqual(rerun.status_code, 200)

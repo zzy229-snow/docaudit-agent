@@ -3,6 +3,7 @@ from app.tools.amount_tool import compare_amounts, compare_hotel_limit
 from app.tools.date_tool import compare_date_range
 from app.tools.document_tool import check_required_documents
 from app.tools.schema import RegisteredTool, ToolInputSchema, ToolSpec
+from app.tools.subject_tool import compare_subject
 
 
 def _required_documents(document_names: list[str]):
@@ -19,6 +20,14 @@ def _date_range(invoice_date: str | None, travel_start_date: str | None, travel_
 
 def _hotel_limit(invoice_amount: str | None, policy_evidence: list[PolicyEvidence]):
     return compare_hotel_limit(invoice_amount, policy_evidence)
+
+
+def _applicant_match(
+    applicant_name: str | None,
+    invoice_buyer: str | None = None,
+    payment_party: str | None = None,
+):
+    return compare_subject(applicant_name, invoice_buyer, payment_party)
 
 
 TOOL_REGISTRY: dict[str, RegisteredTool] = {
@@ -67,6 +76,19 @@ TOOL_REGISTRY: dict[str, RegisteredTool] = {
             ],
         ),
         handler=_hotel_limit,
+    ),
+    "applicant_match": RegisteredTool(
+        spec=ToolSpec(
+            name="applicant_match",
+            description="检查申请人、发票购买方和付款收款方是否一致",
+            category="document",
+            inputs=[
+                ToolInputSchema(name="applicant_name", description="申请人/报销人姓名"),
+                ToolInputSchema(name="invoice_buyer", description="发票购买方/抬头", required=False),
+                ToolInputSchema(name="payment_party", description="付款凭证收款方/收款人", required=False),
+            ],
+        ),
+        handler=_applicant_match,
     ),
 }
 

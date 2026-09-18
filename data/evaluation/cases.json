@@ -11,7 +11,10 @@
       "invoice_date": "2026-08-01",
       "travel_city": "上海",
       "travel_start_date": "2026-08-01",
-      "travel_end_date": "2026-08-02"
+      "travel_end_date": "2026-08-02",
+      "applicant_name": "张三",
+      "invoice_buyer": "张三",
+      "payment_party": "张三"
     },
     "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
   },
@@ -20,14 +23,17 @@
     "name": "住宿金额超标",
     "documents_dir": "data/demo/over_limit",
     "expected_status": "REVIEW_REQUIRED",
-    "expected_risks": ["HOTEL_LIMIT"],
+    "expected_risks": ["APPLICANT_MATCH", "HOTEL_LIMIT"],
     "expected_fields": {
       "invoice_amount": "680.00",
       "payment_amount": "680.00",
       "invoice_date": "2026-08-01",
       "travel_city": "上海",
       "travel_start_date": "2026-08-01",
-      "travel_end_date": "2026-08-02"
+      "travel_end_date": "2026-08-02",
+      "applicant_name": "张三",
+      "invoice_buyer": "李四",
+      "payment_party": "张三"
     },
     "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
   }

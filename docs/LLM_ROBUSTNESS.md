@@ -6,7 +6,7 @@
 
 1. **固定字段白名单**
 
-   只接受 `invoice_amount`、`payment_amount`、`invoice_date`、`travel_start_date`、`travel_end_date`、`travel_city`、`invoice_number`、`applicant_name`。模型输出其他字段会被拒收。
+   只接受 `invoice_amount`、`payment_amount`、`invoice_date`、`travel_start_date`、`travel_end_date`、`travel_city`、`invoice_number`、`applicant_name`、`invoice_buyer`、`payment_party`。模型输出其他字段会被拒收。
 
 2. **严格 JSON Schema**
 
@@ -41,7 +41,7 @@
 
    - 金额统一为两位小数字符串，例如 `¥580` → `580.00`。
    - 日期统一为 `YYYY-MM-DD`，例如 `2026年08月01日` → `2026-08-01`。
-   - 城市、姓名、发票号会做基础格式校验。
+   - 城市、姓名、发票号、发票购买方和付款收款方会做基础格式校验。
 
 6. **失败重试与兜底**
 
