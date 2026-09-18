@@ -8,8 +8,8 @@ class EvaluationRunnerTests(unittest.TestCase):
     def test_default_cases_pass(self):
         report = run_evaluation()
 
-        self.assertEqual(report.metrics.total_cases, 2)
-        self.assertEqual(report.metrics.passed_cases, 2)
+        self.assertEqual(report.metrics.total_cases, 5)
+        self.assertEqual(report.metrics.passed_cases, 5)
         self.assertEqual(report.metrics.failed_cases, 0)
         self.assertEqual(report.metrics.pass_rate, 1.0)
         self.assertEqual(report.metrics.status_accuracy, 1.0)
