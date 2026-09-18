@@ -1,6 +1,6 @@
 # DocAudit Agent
 
-企业报销材料审核项目的稳定演示版。上传电子PDF、TXT、DOCX、XLSX、图片材料，系统会解析文本或走 Mock OCR 路由，提取明确标注的字段，检索演示制度并运行五项确定性检查。默认不需要GPU或模型API。
+企业报销材料审核项目的稳定演示版。上传电子PDF、TXT、DOCX、XLSX、图片材料，系统会解析文本或走 OCR 路由，提取明确标注的字段，检索演示制度并运行五项确定性检查。默认不需要GPU或模型API；生产化演示应将 OCR、LLM 和 RAG 从 mock 模式切到真实服务。
 
 当前稳定演示版适合演示、评审和本地联调；不应描述为生产级财务系统。
 
@@ -51,6 +51,16 @@ python -m app.services.model_smoke
 
 真实模型 API 购买和接入步骤见 `docs/MODEL_API_READINESS.md`。
 
+## 真实 OCR
+
+默认 `OCR_ENGINE=mock` 只适合本地测试。生产化演示可以切换为：
+
+- `OCR_ENGINE=tesseract`：本机 Tesseract OCR；
+- `OCR_ENGINE=http`：百度/阿里/腾讯/自研 OCR HTTP 服务；
+- `OCR_ENGINE=mineru`：扫描 PDF 和复杂版面解析。
+
+配置方式见 `docs/OCR_INTEGRATION.md`。
+
 ## 测试
 
 ```bash
@@ -73,7 +83,7 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 ## 当前限制
 
-此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。真实 OCR、多模态模型、生产级向量检索、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；多模态模型、生产级向量检索、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
 ## 演示与发布
 

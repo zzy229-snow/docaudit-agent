@@ -2,12 +2,13 @@
 
 import unittest
 from io import BytesIO
+from unittest.mock import patch
 
 import fitz
 from PIL import Image
 
 from app.parsers.loader import parse_document
-from app.parsers.ocr import MockOcrEngine, get_ocr_engine
+from app.parsers.ocr import HttpOcrEngine, MockOcrEngine, TesseractOcrEngine, get_ocr_engine
 from app.parsers.pdf_parser import is_low_density
 from app.agent.graph import run_audit
 
@@ -40,6 +41,43 @@ def make_image() -> bytes:
 class OcrRouteTests(unittest.TestCase):
     def test_default_engine_is_mock(self):
         self.assertIsInstance(get_ocr_engine(), MockOcrEngine)
+
+    @patch.dict("os.environ", {"OCR_ENGINE": "tesseract", "TESSERACT_EXE": "tesseract", "TESSERACT_LANG": "chi_sim+eng"})
+    def test_tesseract_engine_can_be_selected(self):
+        engine = get_ocr_engine()
+        self.assertIsInstance(engine, TesseractOcrEngine)
+        self.assertEqual(engine.name, "tesseract")
+
+    @patch.dict("os.environ", {"OCR_ENGINE": "http", "OCR_HTTP_URL": "https://ocr.example.test", "OCR_HTTP_TEXT_PATH": "result.text"})
+    def test_http_engine_can_be_selected(self):
+        engine = get_ocr_engine()
+        self.assertIsInstance(engine, HttpOcrEngine)
+        self.assertEqual(engine.name, "http")
+        self.assertEqual(engine.text_path, "result.text")
+
+    @patch.dict("os.environ", {"OCR_ENGINE": "http", "OCR_HTTP_URL": ""})
+    def test_http_engine_requires_url(self):
+        engine = get_ocr_engine()
+        with self.assertRaisesRegex(RuntimeError, "OCR_HTTP_URL"):
+            engine.recognize(b"fake-image")
+
+    def test_http_engine_extracts_text_from_configured_path(self):
+        engine = HttpOcrEngine(url="https://ocr.example.test", text_path="data.text")
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self):
+                return b'{"data": {"text": "\\u53d1\\u7968\\u91d1\\u989d\\uff1a520.00\\u5143"}}'
+
+        with patch("urllib.request.urlopen", return_value=FakeResponse()):
+            text = engine.recognize(b"fake-image")
+
+        self.assertIn("发票金额：520.00元", text)
 
     def test_scanned_pdf_routes_to_ocr(self):
         doc = parse_document("scan.pdf", make_scanned_pdf())
