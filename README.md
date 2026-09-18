@@ -27,7 +27,7 @@ Streamlit 侧边栏也内置了 5 组虚构演示样例，可直接选择并点�
 python -m uvicorn app.api.main:app --reload --port 8102
 ```
 
-接口文档地址：`http://127.0.0.1:8102/docs`。当前API使用内存任务存储，支持创建任务、上传材料、运行审核，以及查询字段、风险、执行轨迹和可解释摘要。详细说明见 `docs/API.md`。
+接口文档地址：`http://127.0.0.1:8102/docs`。当前API默认使用本地 SQLite 任务存储，数据落在 `data/runtime/audit_tasks.sqlite3`，支持创建任务、上传材料、运行审核、任务列表、生命周期事件、字段修正、人工复核决策，以及查询字段、风险、执行轨迹和可解释摘要。详细说明见 `docs/API.md`。
 
 ## 已完成能力
 
@@ -35,6 +35,7 @@ python -m uvicorn app.api.main:app --reload --port 8102
 - 可解释报告：风险原因、字段证据、制度依据、检查项状态、Agent trace。
 - Streamlit 演示页：内置 5 组虚构样例，支持 JSON 报告下载。
 - FastAPI 任务接口：创建任务、上传材料、运行审核、字段修正、人工复核决策。
+- 生产化任务基础：SQLite 持久化任务、材料、报告、人工修正、复核项和审计事件。
 - LLM 接入护栏：JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。
 - 评测基线：5 条端到端样例，可输出 JSON/Markdown 报告。
 
@@ -72,7 +73,7 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 ## 当前限制
 
-此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；真实 OCR、多模态模型、生产级向量检索、LangGraph 持久化运行时、权限体系和数据库持久化仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。真实 OCR、多模态模型、生产级向量检索、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
 ## 演示与发布
 
