@@ -53,7 +53,8 @@ def extract(state: dict) -> dict:
 def retrieve(state: dict) -> dict:
     started_at = start_node(state, "retrieve", "开始检索制度证据")
     city = state["fields"].get("travel_city")
-    evidence = retrieve_policy(str(city.value) if city else None)
+    evidence = retrieve_policy(str(city.value) if city else None,
+                               files=state.get("files"))
     record_tool_call(
         state,
         "retrieve_policy",
