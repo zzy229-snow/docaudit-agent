@@ -36,7 +36,7 @@ MODEL_NAME=你的模型名
 
 2. 在 `.env` 里填写真实配置。不要提交 `.env`。
 
-3. 在当前终端设置环境变量，或用你习惯的 dotenv 方式加载。PowerShell 临时设置示例：
+3. 项目会自动读取仓库根目录下的 `.env`。如果你不想写 `.env`，也可以在当前终端临时设置环境变量。PowerShell 示例：
 
    ```powershell
    $env:MODEL_PROVIDER="openai-compatible"

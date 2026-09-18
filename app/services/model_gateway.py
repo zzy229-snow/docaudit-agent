@@ -2,6 +2,10 @@ import json
 import os
 from typing import Any
 
+from app.config import load_environment
+
+load_environment()
+
 
 class ModelGatewayError(RuntimeError):
     pass
