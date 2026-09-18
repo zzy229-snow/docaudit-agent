@@ -29,6 +29,8 @@ class AuditSummaryTests(unittest.TestCase):
         risk = next(item for item in summary.risks if item.risk_type == "HOTEL_LIMIT")
         self.assertIn("TRAVEL-V1-4.2-A", risk.policy_refs)
         self.assertIn("入住晚数", risk.next_action)
+        subject_risk = next(item for item in summary.risks if item.risk_type == "APPLICANT_MATCH")
+        self.assertIn("同一主体", subject_risk.next_action)
         self.assertTrue(any(item.chunk_id == "TRAVEL-V1-4.2-A" for item in summary.policy_evidence))
 
 

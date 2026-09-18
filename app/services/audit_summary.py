@@ -114,6 +114,7 @@ def _risk_next_action(risk_type: str) -> str:
         "AMOUNT_MATCH": "核对发票金额与付款凭证金额。",
         "DATE_RANGE": "核对发票日期和出差日期范围。",
         "HOTEL_LIMIT": "核对住宿标准、入住晚数和是否存在例外审批。",
+        "APPLICANT_MATCH": "核对申请人、发票购买方和付款收款方是否为同一主体。",
     }
     return mapping.get(risk_type, "由财务审核员确认处理方式。")
 
