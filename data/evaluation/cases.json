@@ -1,4 +1,95 @@
 [
-  {"case": "normal", "expected_status": "PASS", "expected_risks": []},
-  {"case": "over_limit", "expected_status": "REVIEW_REQUIRED", "expected_risks": ["HOTEL_LIMIT"]}
+  {
+    "case_id": "CASE_TRAVEL_NORMAL_001",
+    "name": "正常差旅住宿报销",
+    "documents_dir": "data/demo/normal",
+    "expected_status": "PASS",
+    "expected_risks": [],
+    "expected_fields": {
+      "invoice_amount": "580.00",
+      "payment_amount": "580.00",
+      "invoice_date": "2026-08-01",
+      "travel_city": "上海",
+      "travel_start_date": "2026-08-01",
+      "travel_end_date": "2026-08-02",
+      "applicant_name": "张三",
+      "invoice_buyer": "张三",
+      "payment_party": "张三"
+    },
+    "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
+  },
+  {
+    "case_id": "CASE_TRAVEL_OVER_LIMIT_001",
+    "name": "住宿金额超标",
+    "documents_dir": "data/demo/over_limit",
+    "expected_status": "REVIEW_REQUIRED",
+    "expected_risks": ["APPLICANT_MATCH", "HOTEL_LIMIT"],
+    "expected_fields": {
+      "invoice_amount": "680.00",
+      "payment_amount": "680.00",
+      "invoice_date": "2026-08-01",
+      "travel_city": "上海",
+      "travel_start_date": "2026-08-01",
+      "travel_end_date": "2026-08-02",
+      "applicant_name": "张三",
+      "invoice_buyer": "李四",
+      "payment_party": "张三"
+    },
+    "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
+  },
+  {
+    "case_id": "CASE_TRAVEL_MISSING_PAYMENT_001",
+    "name": "缺少付款凭证",
+    "documents_dir": "data/demo/missing_payment",
+    "expected_status": "REVIEW_REQUIRED",
+    "expected_risks": ["AMOUNT_MATCH", "REQUIRED_DOCUMENTS"],
+    "expected_fields": {
+      "invoice_amount": "580.00",
+      "invoice_date": "2026-08-01",
+      "travel_city": "上海",
+      "travel_start_date": "2026-08-01",
+      "travel_end_date": "2026-08-02",
+      "applicant_name": "张三",
+      "invoice_buyer": "张三"
+    },
+    "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
+  },
+  {
+    "case_id": "CASE_TRAVEL_SUBJECT_MISMATCH_001",
+    "name": "发票购买方与申请人不一致",
+    "documents_dir": "data/demo/subject_mismatch",
+    "expected_status": "REVIEW_REQUIRED",
+    "expected_risks": ["APPLICANT_MATCH"],
+    "expected_fields": {
+      "invoice_amount": "580.00",
+      "payment_amount": "580.00",
+      "invoice_date": "2026-08-01",
+      "travel_city": "上海",
+      "travel_start_date": "2026-08-01",
+      "travel_end_date": "2026-08-02",
+      "applicant_name": "张三",
+      "invoice_buyer": "李四",
+      "payment_party": "张三"
+    },
+    "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
+  },
+  {
+    "case_id": "CASE_TRAVEL_DATE_OUT_OF_RANGE_001",
+    "name": "发票日期不在出差日期内",
+    "documents_dir": "data/demo/date_out_of_range",
+    "expected_status": "REVIEW_REQUIRED",
+    "expected_risks": ["DATE_RANGE"],
+    "expected_fields": {
+      "invoice_amount": "580.00",
+      "payment_amount": "580.00",
+      "invoice_date": "2026-08-05",
+      "travel_city": "上海",
+      "travel_start_date": "2026-08-01",
+      "travel_end_date": "2026-08-02",
+      "applicant_name": "张三",
+      "invoice_buyer": "张三",
+      "payment_party": "张三"
+    },
+    "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
+  }
 ]
