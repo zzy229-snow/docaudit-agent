@@ -11,7 +11,7 @@ python -m app.evaluation.runner
 python -m app.evaluation.runner --format markdown
 ```
 
-默认读取 `data/evaluation/cases.json`。如果有失败用例，命令会以非 0 状态退出，方便后续接入 CI。
+默认读取 `data/evaluation/cases.json`。当前包含正常报销、住宿超标、缺少付款凭证、主体不一致、日期超范围 5 类样例。如果有失败用例，命令会以非 0 状态退出，方便后续接入 CI。
 
 ## 当前指标
 

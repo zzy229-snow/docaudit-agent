@@ -34,6 +34,12 @@ MODEL_EXTRACTION_MIN_CONFIDENCE=0.7
 
 可以接入 DeepSeek、通义千问兼容接口、OpenAI-compatible 网关等，前提是它们兼容 OpenAI Chat Completions 协议。
 
+购买或填写真实 API 前，先阅读 `docs/MODEL_API_READINESS.md`。配置后可运行：
+
+```powershell
+.\.venv\Scripts\python.exe -m app.services.model_smoke
+```
+
 ## 3. Prompt 与输出格式
 
 字段抽取 Prompt 位于：

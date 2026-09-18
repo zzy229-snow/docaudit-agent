@@ -29,6 +29,14 @@ python -m uvicorn app.api.main:app --reload --port 8102
 
 默认使用 `MODEL_PROVIDER=mock`，不需要API Key。真实模型接入通过 `app/services/model_gateway.py` 统一管理，字段抽取Prompt位于 `app/prompts/field_extraction_v1.txt`。LLM 字段抽取已加入 JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。配置说明见 `docs/MODEL_GATEWAY.md`，稳定性护栏说明见 `docs/LLM_ROBUSTNESS.md`。
 
+购买真实API前，先复制 `.env.example` 并运行连通性检查：
+
+```bash
+python -m app.services.model_smoke
+```
+
+真实模型 API 购买和接入步骤见 `docs/MODEL_API_READINESS.md`。
+
 ## 测试
 
 ```bash
