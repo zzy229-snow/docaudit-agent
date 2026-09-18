@@ -1,7 +1,8 @@
 import unittest
+import tempfile
 from pathlib import Path
 
-from app.evaluation.runner import EvaluationCase, run_case, run_evaluation
+from app.evaluation.runner import EvaluationCase, run_case, run_evaluation, write_report
 
 
 class EvaluationRunnerTests(unittest.TestCase):
@@ -43,6 +44,16 @@ class EvaluationRunnerTests(unittest.TestCase):
 
         self.assertTrue(result.passed)
         self.assertEqual(result.case_id, "normal")
+
+    def test_report_can_be_written_to_file(self):
+        report = run_evaluation()
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "reports" / "evaluation.md"
+
+            write_report(report, output, "markdown")
+
+            self.assertTrue(output.exists())
+            self.assertIn("Audit Agent Evaluation Report", output.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

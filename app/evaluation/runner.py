@@ -220,6 +220,17 @@ def report_to_markdown(report: EvaluationReport) -> str:
     return "\n".join(lines)
 
 
+def render_report(report: EvaluationReport, output_format: str) -> str:
+    if output_format == "markdown":
+        return report_to_markdown(report)
+    return json.dumps(report.model_dump(), ensure_ascii=False, indent=2)
+
+
+def write_report(report: EvaluationReport, output_path: Path, output_format: str) -> None:
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(render_report(report, output_format), encoding="utf-8")
+
+
 def _normalize_value(value: Any) -> str:
     return str(value)
 
@@ -232,13 +243,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run audit-agent regression evaluation cases.")
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES_PATH, help="Path to evaluation cases JSON.")
     parser.add_argument("--format", choices=["json", "markdown"], default="json", help="Output format.")
+    parser.add_argument("--output", type=Path, help="Optional path to save the evaluation report.")
     args = parser.parse_args()
 
     report = run_evaluation(cases_path=args.cases)
-    if args.format == "markdown":
-        print(report_to_markdown(report))
-    else:
-        print(json.dumps(report.model_dump(), ensure_ascii=False, indent=2))
+    rendered = render_report(report, args.format)
+    print(rendered)
+    if args.output:
+        write_report(report, args.output, args.format)
 
     if report.metrics.failed_cases:
         raise SystemExit(1)

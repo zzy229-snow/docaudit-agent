@@ -55,8 +55,10 @@ MODEL_NAME=你的模型名
 
    ```powershell
    .\.venv\Scripts\python.exe -m unittest tests.test_llm_field_extractor tests.test_model_smoke -v
-   .\.venv\Scripts\python.exe -m app.evaluation.runner
+   .\.venv\Scripts\python.exe -m app.evaluation.runner --format markdown --output reports/eval-real-model.md
    ```
+
+6. 用 `docs/REAL_MODEL_EVAL_TEMPLATE.md` 记录本次模型、配置、评测指标和失败用例。
 
 ## 判断是否稳定
 
