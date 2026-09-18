@@ -19,7 +19,7 @@ streamlit run streamlit_app.py
 
 打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元、发票购买方与申请人不一致和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
 
-Streamlit 侧边栏也内置了 5 组虚构演示样例，可直接选择并点击“开始审核”，用于展示风险卡片、字段证据、制度依据、执行轨迹和 JSON 报告下载。
+Streamlit 页面已升级为审核工作台形态：左侧可创建 5 组虚构样例任务，主界面包含任务中心、新建审核、审核详情、风险看板、字段证据、人工复核、事件时间线和 JSON 审核包下载。
 
 ## FastAPI接口
 
