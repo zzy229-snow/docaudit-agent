@@ -48,6 +48,7 @@ python -m unittest discover -s tests -v
 ```bash
 python -m app.evaluation.runner
 python -m app.evaluation.runner --format markdown
+python -m app.evaluation.runner --format markdown --output reports/eval-report.md
 ```
 
 评测用例位于 `data/evaluation/cases.json`，会端到端检查最终状态、风险码、关键字段和制度引用。后续接入真实OCR、LLM或向量检索后，先跑这组评测确认准确率和稳定性没有下降。详细说明见 `docs/EVALUATION.md`。
