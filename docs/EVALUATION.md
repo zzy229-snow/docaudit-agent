@@ -17,7 +17,7 @@ python -m app.evaluation.runner --format markdown
 
 - `pass_rate`：整条用例是否完全通过。
 - `status_accuracy`：最终状态是否符合预期，例如 `PASS` 或 `REVIEW_REQUIRED`。
-- `risk_accuracy`：风险码集合是否符合预期，例如 `HOTEL_LIMIT`。
+- `risk_accuracy`：风险码集合是否符合预期，例如 `HOTEL_LIMIT`、`APPLICANT_MATCH`。
 - `field_accuracy`：关键字段值是否符合预期，例如发票金额、付款金额、城市、日期。
 - `policy_ref_accuracy`：制度证据引用是否符合预期，例如 `TRAVEL-V1-4.2-A`。
 
@@ -29,11 +29,13 @@ python -m app.evaluation.runner --format markdown
   "name": "住宿金额超标",
   "documents_dir": "data/demo/over_limit",
   "expected_status": "REVIEW_REQUIRED",
-  "expected_risks": ["HOTEL_LIMIT"],
+  "expected_risks": ["APPLICANT_MATCH", "HOTEL_LIMIT"],
   "expected_fields": {
     "invoice_amount": "680.00",
     "payment_amount": "680.00",
-    "travel_city": "上海"
+    "travel_city": "上海",
+    "invoice_buyer": "李四",
+    "payment_party": "张三"
   },
   "expected_policy_refs": ["TRAVEL-V1-4.2-A"]
 }

@@ -8,7 +8,7 @@ class ToolRegistryTests(unittest.TestCase):
     def test_registry_contains_core_audit_tools(self):
         self.assertEqual(
             set(TOOL_REGISTRY),
-            {"required_documents", "amount_match", "date_range", "hotel_limit"},
+            {"required_documents", "amount_match", "date_range", "hotel_limit", "applicant_match"},
         )
         self.assertTrue(all(spec.idempotent for spec in list_tool_specs()))
 
@@ -35,6 +35,17 @@ class ToolRegistryTests(unittest.TestCase):
         self.assertEqual(execution.input_summary["policy_evidence"], "list[1]")
         self.assertFalse(execution.result.passed)
         self.assertIn("TRAVEL-V1-4.2-A", execution.result.evidence_refs)
+
+    def test_subject_tool_executes_through_registry(self):
+        execution = get_tool("applicant_match").execute(
+            applicant_name="张三",
+            invoice_buyer="李四",
+            payment_party="张三",
+        )
+
+        self.assertEqual(execution.spec.name, "applicant_match")
+        self.assertFalse(execution.result.passed)
+        self.assertIn("invoice_buyer", execution.result.evidence_refs)
 
     def test_unknown_tool_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "Unknown tool"):

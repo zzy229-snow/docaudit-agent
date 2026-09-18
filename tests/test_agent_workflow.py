@@ -16,7 +16,7 @@ class AgentWorkflowTests(unittest.TestCase):
 
         self.assertTrue(any(item.startswith("task_id=audit-") for item in result.trace))
         self.assertIn("steps=5/10", result.trace)
-        self.assertIn("tool_calls=5", result.trace)
+        self.assertIn("tool_calls=6", result.trace)
         self.assertIn("human_review_items=0", result.trace)
         self.assertTrue(any(item.startswith("parse_documents: 解析3份材料") for item in result.trace))
         self.assertTrue(any(item.startswith("llm_extraction:") for item in result.trace))
@@ -25,7 +25,7 @@ class AgentWorkflowTests(unittest.TestCase):
         result = run_audit(self.load_files("over_limit"))
 
         self.assertEqual(result.status, "REVIEW_REQUIRED")
-        self.assertIn("human_review_items=1", result.trace)
+        self.assertIn("human_review_items=2", result.trace)
 
     def test_max_steps_stops_before_unbounded_execution(self):
         with self.assertRaisesRegex(RuntimeError, "max_steps=2"):

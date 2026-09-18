@@ -1,6 +1,6 @@
 # DocAudit Agent
 
-企业报销材料审核项目的首个可运行版本。上传电子PDF、TXT、DOCX、XLSX材料，提取明确标注的字段，检索演示制度并运行四项确定性检查。图片及扫描PDF尚未接入OCR，会明确报错；当前不需要GPU或模型API。
+企业报销材料审核项目的首个可运行版本。上传电子PDF、TXT、DOCX、XLSX材料，提取明确标注的字段，检索演示制度并运行五项确定性检查。图片及扫描PDF尚未接入OCR，会明确报错；当前不需要GPU或模型API。
 
 ## 运行环境
 
@@ -15,7 +15,7 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
+打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元、发票购买方与申请人不一致和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
 
 ## FastAPI接口
 
