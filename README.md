@@ -1,6 +1,8 @@
 # DocAudit Agent
 
-企业报销材料审核项目的首个可运行版本。上传电子PDF、TXT、DOCX、XLSX材料，提取明确标注的字段，检索演示制度并运行五项确定性检查。图片及扫描PDF尚未接入OCR，会明确报错；当前不需要GPU或模型API。
+企业报销材料审核项目的稳定演示版。上传电子PDF、TXT、DOCX、XLSX、图片材料，系统会解析文本或走 Mock OCR 路由，提取明确标注的字段，检索演示制度并运行五项确定性检查。默认不需要GPU或模型API。
+
+当前稳定演示版适合演示、评审和本地联调；不应描述为生产级财务系统。
 
 ## 运行环境
 
@@ -26,6 +28,15 @@ python -m uvicorn app.api.main:app --reload --port 8102
 ```
 
 接口文档地址：`http://127.0.0.1:8102/docs`。当前API使用内存任务存储，支持创建任务、上传材料、运行审核，以及查询字段、风险、执行轨迹和可解释摘要。详细说明见 `docs/API.md`。
+
+## 已完成能力
+
+- 五项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性。
+- 可解释报告：风险原因、字段证据、制度依据、检查项状态、Agent trace。
+- Streamlit 演示页：内置 5 组虚构样例，支持 JSON 报告下载。
+- FastAPI 任务接口：创建任务、上传材料、运行审核、字段修正、人工复核决策。
+- LLM 接入护栏：JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。
+- 评测基线：5 条端到端样例，可输出 JSON/Markdown 报告。
 
 ## 模型API
 
@@ -61,19 +72,8 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 ## 当前限制
 
-此版是可解释的规则基线。OCR、多模态模型、生产级向量检索、LangGraph运行时和完整交互式人工修正属于后续开发，不能将当前版本描述为已实现这些能力。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；真实 OCR、多模态模型、生产级向量检索、LangGraph 持久化运行时、权限体系和数据库持久化仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
-## 推送到你的Gitee仓库
+## 演示与发布
 
-下载压缩包、解压后，在 `docaudit-agent` 目录打开终端：
-
-```bash
-git init
-git add .
-git commit -m "feat: initial runnable audit baseline"
-git branch -M main
-git remote add origin https://gitee.com/zzy229-snow/docaudit_-agent.git
-git push -u origin main
-```
-
-如果仓库创建时已初始化README，应先克隆仓库，再将解压的项目文件复制进去并提交，以免推送时遇到不同历史。密钥只保存在本地 `.env`，不要提交仓库。
+演示步骤见 `docs/DEMO_GUIDE.md`。合并到 `main` 前的检查清单见 `docs/RELEASE_CHECKLIST.md`。
