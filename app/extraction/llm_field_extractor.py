@@ -41,6 +41,7 @@ class LlmExtractionDiagnostics(BaseModel):
     accepted_fields: list[str] = Field(default_factory=list)
     rejected_fields: dict[str, str] = Field(default_factory=dict)
     errors: list[str] = Field(default_factory=list)
+    error_types: list[str] = Field(default_factory=list)
     fallback_used: bool = False
 
 
@@ -74,6 +75,7 @@ def extract_fields_with_llm_diagnostics(
             break
         except (ModelGatewayError, ValidationError, ValueError) as exc:
             diagnostics.errors.append(f"attempt_{attempt}: {exc}")
+            diagnostics.error_types.append(_classify_error(exc))
     if parsed is None:
         diagnostics.fallback_used = True
         return LlmExtractionOutcome(fields={}, diagnostics=diagnostics)
@@ -98,6 +100,35 @@ def extract_fields_with_llm_diagnostics(
     if not extracted:
         diagnostics.fallback_used = True
     return LlmExtractionOutcome(fields=extracted, diagnostics=diagnostics)
+
+
+def classify_rejection(reason: str) -> str:
+    if reason.startswith("low confidence"):
+        return "low_confidence"
+    if reason == "source_text not found in documents":
+        return "source_text_not_found"
+    if reason == "missing source_text":
+        return "missing_source_text"
+    if reason == "unknown field":
+        return "unknown_field"
+    if reason == "empty value":
+        return "empty_value"
+    if reason.startswith("invalid"):
+        return "invalid_format"
+    if reason == "negative amount":
+        return "invalid_format"
+    return "other_rejection"
+
+
+def _classify_error(exc: Exception) -> str:
+    message = str(exc)
+    if isinstance(exc, ValidationError):
+        return "schema_validation_error"
+    if "未返回JSON对象" in message or "JSON解析失败" in message or "JSON顶层必须是对象" in message:
+        return "json_format_error"
+    if "模型调用失败" in message:
+        return "model_call_error"
+    return "other_error"
 
 
 def _normalize_candidate(name: str, candidate: LlmFieldCandidate, document_context: str) -> tuple[str | None, str | None]:
