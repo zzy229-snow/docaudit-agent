@@ -19,7 +19,8 @@ class CheckResult(BaseModel):
 
 class RiskItem(BaseModel):
     risk_type: str
-    level: Literal["HIGH", "MEDIUM", "LOW"]
+    # PRD 附录A 四级:HIGH/MEDIUM/LOW/INFO(LOW、INFO 只提示,不阻断任务)
+    level: Literal["HIGH", "MEDIUM", "LOW", "INFO"]
     reason: str
     evidence_refs: list[str] = []
     policy_refs: list[str] = []
@@ -28,7 +29,9 @@ class RiskItem(BaseModel):
 class AuditReport(BaseModel):
     status: Literal["PASS", "REVIEW_REQUIRED"]
     fields: dict[str, ExtractedField]
-    policy_evidence: list[PolicyEvidence]
-    checks: list[CheckResult]
-    risks: list[RiskItem]
-    trace: list[str]
+    policy_evidence: list[PolicyEvidence] = []
+    checks: list[CheckResult] = []
+    risks: list[RiskItem] = []
+    #: 各等级风险数量(如 {"HIGH": 1, "MEDIUM": 2}),由 risk_rules.risk_summary 生成
+    risk_summary: dict[str, int] = {}
+    trace: list[str] = []
