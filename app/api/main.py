@@ -1,4 +1,5 @@
 from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from app.agent.graph import run_audit
@@ -6,6 +7,7 @@ from app.api.store import AuditEvent, AuditTask, FieldCorrection, ReviewItem, Re
 from app.models.audit import CheckResult, RiskItem
 from app.models.field import ExtractedField
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
+from app.services.report_exporter import build_html_report
 
 
 app = FastAPI(title="DocAudit Agent API", version="0.1.0")
@@ -152,6 +154,14 @@ def get_trace(task_id: str) -> TraceResponse:
 def get_summary(task_id: str) -> SummaryResponse:
     task = _require_completed_task(task_id)
     return SummaryResponse(task_id=task.task_id, summary=build_audit_summary(task.report))
+
+
+@app.get("/api/v1/audit-tasks/{task_id}/report.html", response_class=HTMLResponse)
+def get_html_report(task_id: str) -> HTMLResponse:
+    task = _require_completed_task(task_id)
+    html = build_html_report(task, events=task_store.list_events(task.task_id))
+    headers = {"Content-Disposition": f'attachment; filename="{task.task_id}-docaudit-report.html"'}
+    return HTMLResponse(content=html, headers=headers)
 
 
 @app.get("/api/v1/audit-tasks/{task_id}/review-items", response_model=ReviewItemsResponse)

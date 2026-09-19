@@ -9,6 +9,7 @@ from app.api.store import AuditTask, task_store
 from app.config import load_environment
 from app.evaluation.runner import run_evaluation
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
+from app.services.report_exporter import build_html_report
 
 
 load_environment()
@@ -265,6 +266,14 @@ def render_report_tabs(task: AuditTask) -> None:
         render_events(task)
 
     with tab_json:
+        html_report = build_html_report(task, events=task_store.list_events(task.task_id))
+        st.download_button(
+            "下载 HTML 正式报告",
+            data=html_report,
+            file_name=f"{task.task_id}-docaudit-report.html",
+            mime="text/html",
+            type="primary",
+        )
         payload = {
             "task_id": task.task_id,
             "status": task.status,
