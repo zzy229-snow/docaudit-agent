@@ -69,7 +69,8 @@ def retrieve_policy(city: str | None, query: str | None = None,
 
     if RAG_MODE == "local":
         try:
-            return _retrieve_local(query or _query_from_city(city))
+            evidence = _retrieve_local(query or _query_from_city(city))
+            return _rerank_by_city(evidence, city)
         except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
             print(f"[rag] local 检索失败,降级 mock: {exc!r}")
             return _retrieve_mock(city, expense_type, department)
@@ -92,6 +93,27 @@ def _query_from_city(city: str | None) -> str:
     if not city:
         return ""
     return f"{city} 住宿标准 差旅 报销 酒店"
+
+
+def _rerank_by_city(evidence: list[PolicyEvidence], city: str | None) -> list[PolicyEvidence]:
+    """local 检索结果按城市语义重排(任务⑥,与 mock 规则一致)。
+
+    关键词检索无法区分"北京、上海…的住宿标准"与"其他城市的住宿标准",
+    会导致非一线城市误命中一线条款。按下列优先级稳定重排:
+    直接含查询城市 > 其他城市兜底(查询城市非一线) > 其余。
+    """
+    if not city:
+        return evidence
+    c = city.removesuffix("市")
+
+    def rank(item: PolicyEvidence) -> int:
+        if c and c in item.content:
+            return 0
+        if "其他城市" in item.content and c not in _FIRST_TIER:
+            return 1
+        return 2
+
+    return sorted(evidence, key=rank)
 
 
 def _retrieve_mock(city: str | None, expense_type: str | None = None,

@@ -30,6 +30,7 @@ def retrieve_local(query: str, limit: int = 3) -> list[PolicyEvidence]:
     scored = []
     for chunk in chunks:
         score = _score(query_tokens, _tokenize(chunk.content + " " + chunk.section_path), doc_freq, len(chunks))
+        score *= _city_adjustment(query, chunk.content)
         if score > 0:
             scored.append((score, chunk))
     scored.sort(key=lambda item: item[0], reverse=True)
@@ -42,6 +43,30 @@ def retrieve_local(query: str, limit: int = 3) -> list[PolicyEvidence]:
         )
         for score, chunk in scored[:limit]
     ]
+
+
+# 一线城市枚举条款中出现的城市(用于城市语义修正)
+_FIRST_TIER = ("北京", "上海", "广州", "深圳")
+
+
+def _city_adjustment(query: str, content: str) -> float:
+    """城市语义修正(任务⑥)。
+
+    纯关键词检索无法区分"北京、上海…的住宿标准"与"其他城市的住宿标准":
+    - 查询指定了一线城市:含该城市的条款升权;
+    - 查询未指定一线城市(如"杭州"):"其他城市"兜底条款升权,一线枚举条款降权。
+    避免扩充制度后非一线城市误命中一线条款。
+    """
+    mentioned = [city for city in _FIRST_TIER if city in query]
+    if mentioned:
+        if any(city in content for city in mentioned):
+            return 1.15
+        return 1.0
+    if "其他城市" in content:
+        return 1.5
+    if "的住宿标准" in content and any(city in content for city in _FIRST_TIER):
+        return 0.4
+    return 1.0
 
 
 def _tokenize(text: str) -> list[str]:

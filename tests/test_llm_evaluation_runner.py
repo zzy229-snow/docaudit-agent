@@ -69,9 +69,9 @@ class LlmEvaluationRunnerTests(unittest.TestCase):
 
         report = run_llm_evaluation(gateway=BrokenGateway([]))
 
-        self.assertEqual(report.metrics.total_cases, 5)
-        self.assertEqual(report.metrics.fallback_cases, 5)
-        self.assertGreaterEqual(report.metrics.json_format_errors, 5)
+        self.assertEqual(report.metrics.total_cases, 50)
+        self.assertEqual(report.metrics.fallback_cases, 50)
+        self.assertGreaterEqual(report.metrics.json_format_errors, 50)
         self.assertEqual(report.metrics.passed_cases, 0)
 
 
