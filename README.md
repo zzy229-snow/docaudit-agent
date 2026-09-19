@@ -93,7 +93,7 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 ## 当前限制
 
-此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；RAG 已提供本地真实检索和 Milvus 混合检索接入口；多模态模型、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；RAG 已提供本地真实检索和 Milvus 混合检索接入口；Agent 主流程已用真实 LangGraph `StateGraph` 编排（`AGENT_ENGINE=langgraph`，缺失时回退顺序执行）。多模态模型、LangGraph checkpoint 持久化、RBAC 权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
 ## 演示与发布
 

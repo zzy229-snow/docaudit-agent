@@ -1,12 +1,32 @@
+from app.agent.planner import build_plan, validate_plan
 from app.agent.risk_rules import build_risk, level_action, overall_status, requires_review, risk_summary
-from app.models.audit import AuditReport, RiskItem
+from app.models.audit import AuditReport, CritiqueResult, RiskItem
 from app.models.field import ExtractedField
-from app.models.state import HumanReviewItem, finish_node, record_tool_call, start_node
+from app.models.state import (
+    HumanReviewItem,
+    budget_exhausted,
+    finish_node,
+    no_progress_detected,
+    record_tool_call,
+    record_tool_retry,
+    start_node,
+)
 from app.parsers.loader import parse_document
 from app.extraction.field_extractor import extract_fields_with_diagnostics
 from app.rag.retriever import retrieve_policy
 from app.services.injection_guard import detect_injection
 from app.tools.registry import get_tool
+
+import os
+import time
+
+
+def _retry_backoff_seconds() -> float:
+    """工具重试退避基数(测试可设为 0)。"""
+    try:
+        return max(0.0, float(os.environ.get("TOOL_RETRY_BACKOFF_SECONDS", "0.05")))
+    except ValueError:
+        return 0.05
 
 
 def parse_documents(state: dict) -> dict:
@@ -95,6 +115,41 @@ def retrieve(state: dict) -> dict:
     return {"policy_evidence": evidence, "trace": state["trace"]}
 
 
+def plan(state: dict) -> dict:
+    """§4.1 阶段4/§7.2 plan:按报销类型、材料与字段生成受控审核计划。"""
+    started_at = start_node(state, "plan", "生成受控审核计划")
+    audit_plan = build_plan(state["task_id"], fields=state.get("fields"),
+                            policy_evidence=state.get("policy_evidence"))
+    issues = validate_plan(audit_plan)
+    if issues:
+        audit_plan = audit_plan.model_copy(
+            update={"status": "needs_replan", "notes": [*audit_plan.notes, *issues]}
+        )
+    skipped = [step.tool for step in audit_plan.steps if step.may_skip]
+    detail = f"生成{len(audit_plan.steps)}步审核计划"
+    if skipped:
+        detail += f"，其中{len(skipped)}步字段不足可能无结论"
+    finish_node(state, "plan", started_at, detail)
+    return {"audit_plan": audit_plan, "trace": state["trace"]}
+
+
+def _execute_with_retry(state: dict, tool_name: str, kwargs: dict):
+    """执行工具,失败按指数退避重试(PRD §7.4 单工具重试次数,幂等工具才重试)。"""
+    tool = get_tool(tool_name)
+    control = state["control"]
+    if not tool.spec.idempotent:
+        return tool.execute(**kwargs)
+    for attempt in range(control.max_tool_retries + 1):
+        try:
+            return tool.execute(**kwargs)
+        except Exception as exc:  # noqa: BLE001 — 重试耗尽后向上抛出,由流程终止
+            if attempt >= control.max_tool_retries:
+                raise
+            record_tool_retry(state, tool_name, attempt + 1, f"{type(exc).__name__}: {exc}")
+            time.sleep(_retry_backoff_seconds() * (2 ** attempt))
+    raise RuntimeError(f"工具 {tool_name} 重试失败")
+
+
 def check(state: dict) -> dict:
     started_at = start_node(state, "check", "开始执行确定性业务工具")
     fields = state["fields"]
@@ -130,7 +185,7 @@ def check(state: dict) -> dict:
             },
         ),
     ]
-    executions = [get_tool(name).execute(**kwargs) for name, kwargs in tool_inputs]
+    executions = [_execute_with_retry(state, name, kwargs) for name, kwargs in tool_inputs]
     results = [execution.result for execution in executions]
     for execution in executions:
         result = execution.result
@@ -202,17 +257,92 @@ def _review_item_for(risk: RiskItem) -> HumanReviewItem:
     )
 
 
+def critic(state: dict) -> dict:
+    """§7.2 critic:复核完整性、证据覆盖率与制度引用是否齐全。"""
+    started_at = start_node(state, "critic", "自检完整性/证据/引用")
+    checks = state.get("checks") or []
+    risks = state.get("risks") or []
+    with_conclusion = [check for check in checks if check.passed is not None]
+    with_evidence = [risk for risk in risks if risk.evidence_refs]
+    coverage = round(len(with_evidence) / len(risks), 4) if risks else 1.0
+
+    issues: list[str] = []
+    skipped = [check.name for check in checks if check.passed is None]
+    if skipped:
+        issues.append(f"以下检查项因字段不足无结论:{'、'.join(skipped)}")
+    missing_evidence = [risk.risk_type for risk in risks if not risk.evidence_refs]
+    if missing_evidence:
+        issues.append(f"以下风险缺少材料/规则证据:{'、'.join(missing_evidence)}")
+    missing_policy = [risk.risk_type for risk in risks
+                      if risk.risk_type == "HOTEL_LIMIT" and not risk.policy_refs]
+    if missing_policy:
+        issues.append(f"以下风险缺少制度条款引用:{'、'.join(missing_policy)}")
+
+    result = CritiqueResult(
+        complete=not issues,
+        issues=issues,
+        checks_total=len(checks),
+        checks_with_conclusion=len(with_conclusion),
+        risks_total=len(risks),
+        risks_with_evidence=len(with_evidence),
+        evidence_coverage=coverage,
+        missing_policy_risks=missing_policy,
+    )
+    finish_node(
+        state, "critic", started_at,
+        "自检通过" if result.complete else f"自检发现{len(issues)}项问题",
+    )
+    return {"critique": result, "trace": state["trace"]}
+
+
+def route_review(state: dict) -> dict:
+    """§7.2 route_review:决定继续 / 转人工 / 终止(§7.4 防循环与预算门控)。"""
+    started_at = start_node(state, "route_review", "决定继续/人工/失败")
+    control = state["control"]
+    risks = state.get("risks") or []
+    blocking = [risk for risk in risks if requires_review(risk.level)]
+    critique = state.get("critique")
+    budget_reason = budget_exhausted(state)
+
+    if control.terminated_reason:
+        route, reason = "fail", control.terminated_reason
+    elif no_progress_detected(state):
+        route, reason = "fail", "相同工具与相同参数连续重复，判定无进展（PRD §7.4）"
+    elif budget_reason:
+        route, reason = "fail", budget_reason
+    elif blocking:
+        levels = "、".join(sorted({risk.level for risk in blocking}))
+        route, reason = "review", f"存在{len(blocking)}项{levels}风险，需人工复核"
+    elif critique and critique.issues:
+        route, reason = "review", f"自检发现问题:{critique.issues[0]}"
+    else:
+        route, reason = "continue", "未发现阻断性风险，自动完成"
+
+    control.route = route
+    control.route_reason = reason
+    finish_node(state, "route_review", started_at, f"路由={route}（{reason}）")
+    return {"control": control, "trace": state["trace"]}
+
+
 def report(state: dict) -> dict:
     started_at = start_node(state, "report", "开始生成审核报告")
     summary = risk_summary(state["risks"])
-    value = AuditReport(status=overall_status(state["risks"]),
+    control = state["control"]
+    if control.route == "fail":
+        status, failure_reason = "FAILED", control.route_reason
+    else:
+        status, failure_reason = overall_status(state["risks"]), None
+    value = AuditReport(status=status,
         fields=state["fields"], policy_evidence=state["policy_evidence"],
-        checks=state["checks"], risks=state["risks"], risk_summary=summary, trace=state["trace"] + [
+        checks=state["checks"], risks=state["risks"], risk_summary=summary,
+        audit_plan=state.get("audit_plan"), critique=state.get("critique"),
+        failure_reason=failure_reason, trace=state["trace"] + [
             f"task_id={state['task_id']}",
             f"steps={state['control'].step_count}/{state['control'].max_steps}",
             f"tool_calls={len(state['tool_calls'])}",
             f"human_review_items={len(state['human_review_items'])}",
             f"risk_levels={','.join(f'{k}:{v}' for k, v in summary.items()) or 'none'}",
+            f"route={control.route}",
         ])
     finish_node(state, "report", started_at, "生成审核报告")
     return {"report": value, "trace": value.trace}

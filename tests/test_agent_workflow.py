@@ -20,9 +20,10 @@ class AgentWorkflowTests(unittest.TestCase):
         result = run_audit(self.load_files("normal"))
 
         self.assertTrue(any(item.startswith("task_id=audit-") for item in result.trace))
-        self.assertIn("steps=5/10", result.trace)
+        self.assertIn("steps=8/10", result.trace)
         self.assertIn("tool_calls=7", result.trace)
         self.assertIn("human_review_items=0", result.trace)
+        self.assertIn("route=continue", result.trace)
         self.assertTrue(any(item.startswith("parse_documents: 解析3份材料") for item in result.trace))
         self.assertTrue(any(item.startswith("llm_extraction:") for item in result.trace))
 
