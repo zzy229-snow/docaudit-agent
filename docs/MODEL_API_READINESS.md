@@ -56,6 +56,7 @@ MODEL_NAME=你的模型名
    ```powershell
    .\.venv\Scripts\python.exe -m unittest tests.test_llm_field_extractor tests.test_model_smoke -v
    .\.venv\Scripts\python.exe -m app.evaluation.runner --format markdown --output reports/eval-real-model.md
+   .\.venv\Scripts\python.exe -m app.evaluation.llm_runner --format markdown --output reports/llm-real-model.md
    ```
 
 6. 用 `docs/REAL_MODEL_EVAL_TEMPLATE.md` 记录本次模型、配置、评测指标和失败用例。
@@ -70,5 +71,24 @@ MODEL_NAME=你的模型名
 - 是否出现低置信字段被拒收；
 - 评测集准确率是否低于 mock 基线；
 - Agent trace 中 `llm_extraction` 是否频繁 `fallback_used=True`。
+- `app.evaluation.llm_runner` 中 JSON 格式错误、Schema 错误、幻觉证据拒收、低置信拒收是否过高。
 
 如果评测下降，先不要改业务规则，优先排查模型配置、Prompt、输出格式和字段证据。
+
+## LLM 鲁棒性评测指标
+
+`python -m app.evaluation.llm_runner --format markdown` 会专门评估真实模型字段抽取层，重点不是最终审核规则，而是模型输出是否可靠。
+
+报告会统计：
+
+- `json_format_errors`：模型没有返回可解析 JSON。
+- `schema_validation_errors`：JSON 结构不符合字段抽取 Schema。
+- `model_call_errors`：API 调用失败、超时、鉴权失败等。
+- `low_confidence_rejections`：模型给出的置信度低于阈值。
+- `hallucinated_evidence_rejections`：`source_text` 不存在于原文，属于高风险幻觉。
+- `missing_source_text_rejections`：缺少原文证据。
+- `unknown_field_rejections`：输出了字段白名单之外的字段。
+- `invalid_format_rejections`：金额、日期、城市、姓名等格式不合法。
+- `fallback_cases`：该用例最终没有可用 LLM 字段，需要规则兜底。
+
+如果真实模型报告明显低于 mock 基线，说明不是业务规则问题，而是模型输出稳定性、Prompt 或证据约束需要继续优化。
