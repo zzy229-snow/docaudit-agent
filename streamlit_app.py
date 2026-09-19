@@ -25,6 +25,10 @@ DEMO_CASES = {
     "发票日期超出行程": "date_out_of_range",
 }
 
+# 视图导航(状态驱动,便于"打开任务"直接跳转到审核详情)
+NAV_TASKS, NAV_CREATE, NAV_DETAIL = "任务中心", "新建审核", "审核详情"
+NAV_OPTIONS = [NAV_TASKS, NAV_CREATE, NAV_DETAIL]
+
 
 st.set_page_config(page_title="DocAudit Agent 审核工作台", layout="wide")
 
@@ -58,6 +62,31 @@ def result_label(task: AuditTask) -> str:
     return "需复核"
 
 
+def review_progress(task: AuditTask) -> str:
+    """复核进度文本:驳回/通过后任务中心立即可见变化。"""
+    items = task.review_items
+    if not items:
+        return "-"
+    approved = sum(1 for item in items if item.status == "APPROVED")
+    rejected = sum(1 for item in items if item.status == "REJECTED")
+    pending = len(items) - approved - rejected
+    parts = []
+    if pending:
+        parts.append(f"待复核 {pending}")
+    if approved:
+        parts.append(f"通过 {approved}")
+    if rejected:
+        parts.append(f"驳回 {rejected}")
+    return " / ".join(parts)
+
+
+def review_counts(task: AuditTask) -> tuple[int, int]:
+    items = task.review_items
+    approved = sum(1 for item in items if item.status == "APPROVED")
+    rejected = sum(1 for item in items if item.status == "REJECTED")
+    return approved, rejected
+
+
 def select_task(task_id: str) -> None:
     st.session_state["selected_task_id"] = task_id
 
@@ -73,8 +102,25 @@ def create_task_with_files(files: list[tuple[str, bytes]]) -> AuditTask:
     task = task_store.create_task()
     for file_name, content in files:
         task = task_store.add_file(task.task_id, file_name, content)
-    select_task(task.task_id)
+    st.session_state["selected_task_id"] = task.task_id
     return task
+
+
+def request_open(task_id: str) -> None:
+    """打开任务:设为当前任务并切换到审核详情。"""
+    st.session_state["selected_task_id"] = task_id
+    switch_view(NAV_DETAIL)
+
+
+def switch_view(view: str) -> None:
+    """切换视图。
+
+    Streamlit 的 radio 一旦被用户交互过,其前端值优先于后端 session_state 修改;
+    因此递增"导航代次"让 radio 以新 key 重建,从而接受新的选中值。
+    """
+    st.session_state["view"] = view
+    st.session_state["nav_gen"] = st.session_state.get("nav_gen", 0) + 1
+    st.rerun()
 
 
 def run_selected_task(task: AuditTask) -> AuditTask:
@@ -86,20 +132,23 @@ def run_selected_task(task: AuditTask) -> AuditTask:
 
 
 def show_status_badge(task: AuditTask) -> None:
+    approved, rejected = review_counts(task)
     if task.status == "FAILED":
         st.error(f"任务失败：{task.error}")
     elif task.report and task.report.status == "PASS":
         st.success("审核通过")
     elif task.report and task.report.status == "REVIEW_REQUIRED":
-        st.warning("需要人工复核")
+        suffix = f"（复核：通过 {approved} / 驳回 {rejected}）" if (approved or rejected) else ""
+        st.warning(f"需要人工复核{suffix}")
     elif task.status == "READY":
         st.info("材料已就绪，等待运行审核")
     else:
         st.info("任务已创建，等待上传材料")
 
 
-def render_task_table(tasks: list[AuditTask]) -> None:
-    st.dataframe(
+def render_task_table(tasks: list[AuditTask]):
+    """任务表格:单击任意行即可打开该任务详情。"""
+    return st.dataframe(
         [
             {
                 "任务ID": task.task_id,
@@ -107,13 +156,15 @@ def render_task_table(tasks: list[AuditTask]) -> None:
                 "审核结论": result_label(task),
                 "文件数": len(task.files),
                 "风险数": len(task.report.risks) if task.report else 0,
-                "复核项": len(task.review_items),
+                "复核进度": review_progress(task),
                 "更新时间": task.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
             }
             for task in tasks
         ],
         use_container_width=True,
         hide_index=True,
+        on_select="rerun",
+        selection_mode="single-row",
     )
 
 
@@ -151,11 +202,19 @@ def render_risks(summary: AuditExplanationSummary) -> None:
 
 
 def render_review_workbench(task: AuditTask) -> None:
-    if not task.review_items:
+    items = task.review_items
+    if not items:
         st.success("暂无待复核项。")
         return
 
-    for item in task.review_items:
+    approved, rejected = review_counts(task)
+    pending = len(items) - approved - rejected
+    if pending:
+        st.info(f"复核进度：待处理 {pending} / 已通过 {approved} / 已驳回 {rejected}")
+    else:
+        st.success(f"全部复核项已处理：已通过 {approved} / 已驳回 {rejected}（任务中心表格「复核进度」列已同步）")
+
+    for item in items:
         with st.container(border=True):
             cols = st.columns([2, 4, 1, 1])
             cols[0].markdown(f"**{item.risk_type}**")
@@ -300,6 +359,12 @@ def render_report_tabs(task: AuditTask) -> None:
         )
 
 
+# ---------------- 侧栏 ----------------
+if "view" not in st.session_state:
+    st.session_state["view"] = NAV_TASKS
+if "nav_gen" not in st.session_state:
+    st.session_state["nav_gen"] = 0
+
 with st.sidebar:
     st.header("系统运行状态")
     st.metric("模型模式", provider_label())
@@ -313,7 +378,7 @@ with st.sidebar:
     if st.button("创建样例任务", type="primary"):
         task = create_task_with_files(load_demo_files(DEMO_CASES[demo_label]))
         st.success(f"已创建任务：{task.task_id}")
-        st.rerun()
+        request_open(task.task_id)
 
     st.divider()
     if st.button("运行评测基线"):
@@ -324,6 +389,7 @@ with st.sidebar:
         )
 
 
+# ---------------- 主区域 ----------------
 st.title("DocAudit Agent 审核工作台")
 st.caption("面向企业报销材料的可解释审核系统：任务持久化、字段证据、制度依据、人工复核和审计事件。")
 
@@ -334,21 +400,41 @@ overview_mid.metric("待审核", sum(1 for item in tasks if item.status == "READ
 overview_right.metric("需复核", sum(1 for item in tasks if item.report and item.report.status == "REVIEW_REQUIRED"))
 overview_fourth.metric("已通过", sum(1 for item in tasks if item.report and item.report.status == "PASS"))
 
-tab_tasks, tab_create, tab_detail = st.tabs(["任务中心", "新建审核", "审核详情"])
+# 状态驱动的视图切换(替代 st.tabs:"打开任务"可以直接跳到审核详情)
+view = st.radio(
+    "视图导航",
+    NAV_OPTIONS,
+    index=NAV_OPTIONS.index(st.session_state["view"]),
+    horizontal=True,
+    label_visibility="collapsed",
+    key=f"nav-{st.session_state['nav_gen']}",
+)
+if view != st.session_state["view"]:
+    # 用户手动切换导航:同步状态(不 rerun,本次 run 直接用新视图渲染)
+    st.session_state["view"] = view
 
-with tab_tasks:
+if view == NAV_TASKS:
     st.subheader("任务中心")
     if tasks:
-        render_task_table(tasks)
-        task_options = {f"{task.task_id} · {status_label(task.status)} · {result_label(task)}": task.task_id for task in tasks}
-        current = st.selectbox("选择要查看的任务", list(task_options))
-        if st.button("打开任务"):
-            select_task(task_options[current])
-            st.rerun()
+        st.caption("提示：单击表格任意一行即可直接打开该任务的审核详情。")
+        table = render_task_table(tasks)
+        selected_rows = getattr(getattr(table, "selection", None), "rows", []) or []
+        if selected_rows:
+            picked = tasks[selected_rows[0]]
+            if picked.task_id != st.session_state.get("selected_task_id"):
+                request_open(picked.task_id)
+
+        task_options = {
+            f"{task.task_id} · {status_label(task.status)} · {result_label(task)} · {review_progress(task)}": task.task_id
+            for task in tasks
+        }
+        current = st.selectbox("或从列表选择任务", list(task_options))
+        if st.button("打开任务", type="primary"):
+            request_open(task_options[current])
     else:
         st.info("暂无任务。可在左侧创建样例任务，或在“新建审核”上传材料。")
 
-with tab_create:
+elif view == NAV_CREATE:
     st.subheader("新建审核任务")
     st.write("手动上传真实或脱敏材料时，文件名建议包含 `invoice`、`payment`、`approval`，便于当前规则识别材料类型。")
     uploads = st.file_uploader(
@@ -361,10 +447,10 @@ with tab_create:
             st.warning("请先上传材料。")
         else:
             task = create_task_with_files([(file.name, file.getvalue()) for file in uploads])
-            st.success(f"已创建任务：{task.task_id}")
-            st.rerun()
+            st.success(f"已创建任务：{task.task_id}（已切换到审核详情）")
+            request_open(task.task_id)
 
-with tab_detail:
+else:
     task = selected_task()
     if task is None:
         st.info("请先在“任务中心”选择任务，或创建一个新任务。")
@@ -373,12 +459,14 @@ with tab_detail:
         top_left.subheader(f"审核详情 · {task.task_id}")
         if top_right.button("刷新"):
             st.rerun()
+        if top_left.button("返回任务中心"):
+            switch_view(NAV_TASKS)
         show_status_badge(task)
 
         meta_left, meta_mid, meta_right, meta_fourth = st.columns(4)
         meta_left.metric("任务状态", status_label(task.status))
         meta_mid.metric("文件数", len(task.files))
-        meta_right.metric("复核项", len(task.review_items))
+        meta_right.metric("复核进度", review_progress(task))
         meta_fourth.metric("更新时间", task.updated_at.strftime("%H:%M:%S"))
 
         with st.expander("材料清单", expanded=True):
