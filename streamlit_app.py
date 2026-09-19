@@ -65,9 +65,11 @@ def _inject_nav_style() -> None:
   div[role="radiogroup"] label[aria-checked="true"] p {{
       font-weight: 600;
   }}
-  /* 隐藏圆点指示器(Streamlit 1.64:label 内首个 span 为圆点),只留下划线 */
-  div[role="radiogroup"] label > span:first-child {{
-      display: none;
+  /* 隐藏圆点指示器(Streamlit 1.64:label 内首个 div 为圆点),只留下划线 */
+  div[role="radiogroup"] label div:first-child,
+  div[role="radiogroup"] label > span:first-child,
+  div[role="radiogroup"] label svg:first-child {{
+      display: none !important;
   }}
 </style>
 """,
