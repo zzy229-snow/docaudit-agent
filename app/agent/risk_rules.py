@@ -33,6 +33,7 @@ SEVERITY_RULES: dict[str, str] = {
     # 金额与日期
     "AMOUNT_MATCH": "HIGH",               # 附录A:重大金额不一致
     "DUPLICATE_INVOICE": "HIGH",          # 附录A:重复发票
+    "INVOICE_NUMBER_CONFLICT": "MEDIUM",  # 同号但日期/金额不一致:需核实
     "DATE_RANGE": "MEDIUM",               # 附录A:日期边界冲突
     # 制度与主体
     "HOTEL_LIMIT": "MEDIUM",              # 附录A:制度超标

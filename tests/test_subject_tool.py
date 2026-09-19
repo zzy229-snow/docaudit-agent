@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 
 from app.agent.graph import run_audit
+from app.services.invoice_registry import isolate_registry
 from app.tools.subject_tool import compare_subject
 
 
@@ -9,6 +10,10 @@ BASE = Path(__file__).resolve().parents[1] / "data" / "demo"
 
 
 class SubjectMatchTests(unittest.TestCase):
+    def setUp(self):
+        # 发票查重登记表隔离,避免用例之间互相污染(FR-204)
+        isolate_registry()
+
     def load_files(self, case: str):
         return [(p.name, p.read_bytes()) for p in sorted((BASE / case).iterdir()) if p.is_file()]
 

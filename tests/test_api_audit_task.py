@@ -4,6 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.api.main import app
+from app.services.invoice_registry import isolate_registry
 
 
 BASE = Path(__file__).resolve().parents[1] / "data" / "demo"
@@ -11,6 +12,8 @@ BASE = Path(__file__).resolve().parents[1] / "data" / "demo"
 
 class AuditTaskApiTests(unittest.TestCase):
     def setUp(self):
+        # 发票查重登记表隔离:同一用例内多次提交同一发票不应互相污染(FR-204)
+        isolate_registry()
         self.client = TestClient(app)
 
     def create_task(self) -> str:
@@ -47,7 +50,8 @@ class AuditTaskApiTests(unittest.TestCase):
 
         trace = self.client.get(f"/api/v1/audit-tasks/{task_id}/trace")
         self.assertEqual(trace.status_code, 200)
-        self.assertTrue(any(item.startswith("task_id=audit-") for item in trace.json()["trace"]))
+        # 审核流程复用 API 任务ID(修正后重跑也是同一任务,FR-104/FR-204)
+        self.assertTrue(any(item == f"task_id={task_id}" for item in trace.json()["trace"]))
 
     def test_audit_task_over_limit_exposes_risks(self):
         task_id = self.create_task()

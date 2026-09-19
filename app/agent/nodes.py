@@ -104,6 +104,16 @@ def check(state: dict) -> dict:
                 "payment_party": get("payment_party"),
             },
         ),
+        # FR-204:重复发票查询(号码+开票日期+金额),命中返回关联任务编号
+        (
+            "check_duplicate_invoice",
+            {
+                "invoice_number": get("invoice_number"),
+                "invoice_date": get("invoice_date"),
+                "invoice_amount": get("invoice_amount"),
+                "task_id": state.get("task_id"),
+            },
+        ),
     ]
     executions = [get_tool(name).execute(**kwargs) for name, kwargs in tool_inputs]
     results = [execution.result for execution in executions]

@@ -1,7 +1,8 @@
 import unittest
 
 from app.evaluation.llm_runner import run_llm_case, run_llm_evaluation
-from app.evaluation.runner import EvaluationCase
+from app.evaluation.runner import DEFAULT_CASES_PATH, EvaluationCase, load_cases
+from app.services.invoice_registry import isolate_registry
 
 
 class StubGateway:
@@ -21,6 +22,10 @@ class StubGateway:
 
 
 class LlmEvaluationRunnerTests(unittest.TestCase):
+    def setUp(self):
+        # 发票查重登记表隔离,避免用例之间互相污染(FR-204)
+        isolate_registry()
+
     def test_llm_case_reports_matched_and_rejected_fields(self):
         case = EvaluationCase(
             case_id="CASE_STUB",
@@ -69,9 +74,10 @@ class LlmEvaluationRunnerTests(unittest.TestCase):
 
         report = run_llm_evaluation(gateway=BrokenGateway([]))
 
-        self.assertEqual(report.metrics.total_cases, 50)
-        self.assertEqual(report.metrics.fallback_cases, 50)
-        self.assertGreaterEqual(report.metrics.json_format_errors, 50)
+        expected = len(load_cases(DEFAULT_CASES_PATH))
+        self.assertEqual(report.metrics.total_cases, expected)
+        self.assertEqual(report.metrics.fallback_cases, expected)
+        self.assertGreaterEqual(report.metrics.json_format_errors, expected)
         self.assertEqual(report.metrics.passed_cases, 0)
 
 

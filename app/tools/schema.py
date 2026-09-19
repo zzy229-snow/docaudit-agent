@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 from app.models.audit import CheckResult
 
 
-ToolCategory = Literal["document", "amount", "date", "policy"]
+ToolCategory = Literal["document", "amount", "date", "policy", "database"]
 ToolDeterminism = Literal["deterministic", "model_assisted"]
 
 

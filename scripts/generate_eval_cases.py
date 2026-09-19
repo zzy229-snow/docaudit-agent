@@ -11,11 +11,22 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from itertools import count
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 OUT_DIR = REPO / "data" / "eval_generated"
 OUT_CASES = REPO / "data" / "evaluation" / "cases_generated.json"
+CASES_JSON = REPO / "data" / "evaluation" / "cases.json"
+
+#: 每例使用唯一发票号码,避免与查重(FR-204)互相干扰
+_INVOICE_SEQ = count(90001)
+DUPLICATE_INVOICE_NUMBER = "TEST-2026-99001"
+
+
+def next_invoice_number() -> str:
+    return f"TEST-2026-{next(_INVOICE_SEQ)}"
+
 
 FIRST_TIER_LIMIT = 600
 OTHER_LIMIT = 450
@@ -41,9 +52,10 @@ def _fmt(v) -> str:
 def build_case(case_id, name, city, invoice_amount, payment_amount, invoice_date,
                start, end, applicant, buyer, payee,
                expected_status, expected_risks, missing=None,
-               invoice_number="TEST-2026-90000", policy_refs=None) -> dict:
+               invoice_number=None, policy_refs=None) -> dict:
     """构造一个案例:写入材料目录,返回 case 标注 dict。"""
     missing = missing or []
+    invoice_number = invoice_number or next_invoice_number()
     files = {}
     files["invoice.txt"] = (
         f"发票号码：{invoice_number}\n"
@@ -73,6 +85,7 @@ def build_case(case_id, name, city, invoice_amount, payment_amount, invoice_date
         (case_dir / fname).write_text(content, encoding="utf-8")
 
     fields = {
+        "invoice_number": invoice_number,
         "invoice_amount": _fmt(invoice_amount),
         "payment_amount": _fmt(payment_amount),
         "invoice_date": invoice_date,
@@ -252,21 +265,47 @@ def gen_all() -> list[dict]:
         policy_refs=["TRAVEL-V1-4.2-B"],
     ))
 
+    # ---- 重复发票查重(FR-204):同一发票号码连续提交三例 ----
+    add(build_case(
+        "CASE_DUP_01", "首次提交发票(登记历史)", "北京",
+        520, 520, "2026-08-01", "2026-08-01", "2026-08-02",
+        APPLICANT, APPLICANT, APPLICANT, "PASS", [],
+        invoice_number=DUPLICATE_INVOICE_NUMBER, policy_refs=["TRAVEL-V1-4.2-A"],
+    ))
+    add(build_case(
+        "CASE_DUP_02", "重复提交同一发票", "北京",
+        520, 520, "2026-08-01", "2026-08-01", "2026-08-02",
+        APPLICANT, APPLICANT, APPLICANT, "REVIEW_REQUIRED", ["DUPLICATE_INVOICE"],
+        invoice_number=DUPLICATE_INVOICE_NUMBER, policy_refs=["TRAVEL-V1-4.2-A"],
+    ))
+    add(build_case(
+        "CASE_DUP_03", "同一发票号码但金额不一致", "北京",
+        480, 480, "2026-08-01", "2026-08-01", "2026-08-02",
+        APPLICANT, APPLICANT, APPLICANT, "REVIEW_REQUIRED", ["INVOICE_NUMBER_CONFLICT"],
+        invoice_number=DUPLICATE_INVOICE_NUMBER, policy_refs=["TRAVEL-V1-4.2-A"],
+    ))
+
     return cases
 
 
 def main() -> None:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     cases = gen_all()
-    OUT_CASES.write_text(json.dumps(cases, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = json.dumps(cases, ensure_ascii=False, indent=2)
+    # cases.json 是评测实际读取的文件,cases_generated.json 保留生成产物,两者保持一致
+    OUT_CASES.write_text(payload, encoding="utf-8")
+    CASES_JSON.write_text(payload, encoding="utf-8")
     ids = [c["case_id"] for c in cases]
     dup = {x for x in ids if ids.count(x) > 1}
-    print(f"生成 {len(cases)} 例 -> {OUT_CASES}")
+    print(f"生成 {len(cases)} 例 -> {CASES_JSON}")
     print(f"唯一 case_id: {len(set(ids))}")
     if dup:
         print(f"!! 重复 case_id: {dup}")
     risk = Counter(frozenset(c["expected_risks"]) for c in cases)
     print("风险分布:", dict(risk))
+    numbers = [c["expected_fields"].get("invoice_number") for c in cases]
+    dup_numbers = {n for n in numbers if n and numbers.count(n) > 1}
+    print("唯一发票号码:", len({n for n in numbers if n}), "重复号码(预期只含查重样例):", dup_numbers)
     missing_dirs = [c["case_id"] for c in cases if not (OUT_DIR / c["case_id"]).exists()]
     if missing_dirs:
         print("!! 缺失目录:", missing_dirs)

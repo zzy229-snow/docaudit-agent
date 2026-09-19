@@ -121,6 +121,7 @@ def run_audit_task(task_id: str) -> RunResponse:
         report = run_audit(
             [(item.file_name, item.content) for item in task.files],
             field_overrides=task_store.field_overrides(task.task_id),
+            task_id=task.task_id,
         )
     except (ValueError, RuntimeError) as exc:
         failed = task_store.save_error(task.task_id, str(exc))

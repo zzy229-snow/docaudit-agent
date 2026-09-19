@@ -8,7 +8,14 @@ class ToolRegistryTests(unittest.TestCase):
     def test_registry_contains_core_audit_tools(self):
         self.assertEqual(
             set(TOOL_REGISTRY),
-            {"required_documents", "amount_match", "date_range", "hotel_limit", "applicant_match"},
+            {
+                "required_documents",
+                "amount_match",
+                "date_range",
+                "hotel_limit",
+                "applicant_match",
+                "check_duplicate_invoice",
+            },
         )
         self.assertTrue(all(spec.idempotent for spec in list_tool_specs()))
 

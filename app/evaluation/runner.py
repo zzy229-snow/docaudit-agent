@@ -8,16 +8,28 @@ from __future__ import annotations
 
 import argparse
 import json
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.agent.graph import run_audit
+from app.services.invoice_registry import isolated_registry
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CASES_PATH = REPO_ROOT / "data" / "evaluation" / "cases.json"
+
+
+@contextmanager
+def _maybe_isolated_registry(isolate: bool) -> Iterator[None]:
+    """按需隔离发票查重登记表,保证重复发票用例每次运行都从干净历史开始。"""
+    if not isolate:
+        yield
+        return
+    with isolated_registry():
+        yield
 
 
 class EvaluationCase(BaseModel):
@@ -118,7 +130,7 @@ def load_case_files(documents_dir: Path) -> list[tuple[str, bytes]]:
 
 def run_case(case: EvaluationCase, repo_root: Path = REPO_ROOT) -> CaseResult:
     documents_dir = repo_root / str(case.documents_dir)
-    report = run_audit(load_case_files(documents_dir))
+    report = run_audit(load_case_files(documents_dir), task_id=f"eval-{case.case_id}")
 
     actual_fields = {name: _normalize_value(field.value) for name, field in report.fields.items()}
     field_mismatches = [
@@ -170,9 +182,16 @@ def run_case(case: EvaluationCase, repo_root: Path = REPO_ROOT) -> CaseResult:
 def run_evaluation(
     cases_path: Path = DEFAULT_CASES_PATH,
     repo_root: Path = REPO_ROOT,
+    isolate_invoice_registry: bool = True,
 ) -> EvaluationReport:
-    cases = load_cases(cases_path)
-    results = [run_case(case, repo_root=repo_root) for case in cases]
+    """运行全部用例。
+
+    ``isolate_invoice_registry`` 默认开启:把发票查重登记表指向临时文件,
+    这样重复发票用例在每次运行中都从干净历史开始,结论可复现。
+    """
+    with _maybe_isolated_registry(isolate_invoice_registry):
+        cases = load_cases(cases_path)
+        results = [run_case(case, repo_root=repo_root) for case in cases]
     total = len(results)
     passed_cases = sum(1 for item in results if item.passed)
 

@@ -174,6 +174,7 @@ def run_selected_task(task: AuditTask) -> AuditTask:
     report = run_audit(
         [(item.file_name, item.content) for item in task.files],
         field_overrides=task_store.field_overrides(task.task_id),
+        task_id=task.task_id,
     )
     return task_store.save_report(task.task_id, report)
 
