@@ -91,7 +91,8 @@ class OcrRouteTests(unittest.TestCase):
 
     def test_image_routes_to_ocr(self):
         doc = parse_document("photo.jpg", make_image())
-        self.assertEqual(doc.document_type, "image_ocr")
+        # 任务④:图片走 OCR 路径,并按困难区域评估追加难度后缀(_hard/_handwriting)
+        self.assertTrue(doc.document_type.startswith("image_ocr"))
         self.assertIn("OCR-MOCK", doc.text)
 
     def test_low_density_detection(self):
