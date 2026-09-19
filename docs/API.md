@@ -128,9 +128,34 @@ API 测试会覆盖：
 | `policy_evidence` | 制度条款引用 |
 | `trace` | Agent 执行轨迹 |
 
-## 8. 制度管理与评测接口（新增）
+## 8. 任务命名（新增）
 
-### 8.1 制度管理（PRD §5.4 FR-301~FR-304）
+任务有两个标识：技术编号 `task-xxxxxxxxxxxx`（接口/审计用）与**报销单名称**（人看的主标识）。
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| PATCH | `/api/v1/audit-tasks/{task_id}` | 改报销单名称（改名后锁定，不再被审核结果覆盖） |
+
+命名规则：**日期区间 + 人物 + 事件**，例如 `2026.9.18-9.19 张三 住宿报销`。
+
+- 建单时按 `applicant` + `expense_type` + `note`(备注/事由，作为“事件”) 生成，例如 `张三 住宿报销`；
+- 运行审核后按抽取字段补全日期区间（出差开始/结束，缺失时回退发票日期）；
+- `title` 可显式传入，传了就锁定；未锁定的名称会在每次审核后被自动补全；
+- 名称会做清洗（去控制字符、折叠空白、限长 80 字符）并用于 HTML 报告的标题与下载文件名。
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/v1/audit-tasks \
+  -H "Content-Type: application/json" \
+  -d '{"applicant":"张三","department":"市场部","expense_type":"HOTEL","note":"住宿报销"}'
+# -> {"task_id":"task-...","title":"张三 住宿报销", ...}   运行审核后 title -> "2026.8.1-8.2 张三 住宿报销"
+
+curl -X PATCH http://127.0.0.1:8000/api/v1/audit-tasks/task-xxxxxxxxxxxx \
+  -H "Content-Type: application/json" -d '{"title":"2026.9.18-9.19 张三 住宿报销"}'
+```
+
+## 9. 制度管理与评测接口（新增）
+
+### 9.1 制度管理（PRD §5.4 FR-301~FR-304）
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -156,7 +181,7 @@ curl -X POST http://127.0.0.1:8102/api/v1/policies \
 curl -X POST "http://127.0.0.1:8102/api/v1/policies/UP-XXXXXXXX/publish?switch_version=true"
 ```
 
-### 8.2 离线评测（PRD §12.2）
+### 9.2 离线评测（PRD §12.2）
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -165,10 +190,10 @@ curl -X POST "http://127.0.0.1:8102/api/v1/policies/UP-XXXXXXXX/publish?switch_v
 请求体（可省略）：`{"cases_path": "data/evaluation/cases.json", "format": "json"}`。
 `cases_path` 必须位于仓库目录内，否则返回 400（防路径穿越）；文件不存在返回 404。
 
-## 9. 当前限制
+## 10. 当前限制
 
 - 当前 SQLite 是本地单机持久化，不适合作为多实例部署的共享数据库。
-- 尚未实现用户、角色和权限控制。
+- 权限为最小可用 RBAC（`AUTH_MODE=enforce` + 请求头身份 + 角色白名单 + 任务归属），尚未接入 SSO/JWT 与组织范围授权。
 - 字段修正后的第一版实现采用全量重跑，尚未做依赖图局部重跑。
 - 当前报告导出为 HTML，尚未提供 PDF 原生生成。
 - 尚未实现幂等请求 ID、文件去重和任务恢复锁。
@@ -176,7 +201,7 @@ curl -X POST "http://127.0.0.1:8102/api/v1/policies/UP-XXXXXXXX/publish?switch_v
 
 这些限制是当前生产化改造的下一批边界，不应在对外说明中夸大。
 
-## 10. 后续建议
+## 11. 后续建议
 
 优先级建议：
 

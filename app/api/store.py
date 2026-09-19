@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from app.models.audit import AuditReport, RiskItem
 from app.config import repo_root
+from app.services.task_naming import build_report_title, sanitize_title, title_from_fields
 
 
 TaskStatus = Literal["CREATED", "READY", "COMPLETED", "FAILED"]
@@ -68,6 +69,10 @@ class AuditTask:
     department: str = ""
     expense_type: str = ""
     note: str = ""
+    #: 报销单展示名(客户视角的"发票命名":日期区间 人物 事件);task_id 仅作技术编号
+    title: str = ""
+    #: 用户显式命名(或改名)后不再被审核结果自动覆盖
+    title_locked: bool = False
 
 
 class InMemoryAuditTaskStore:
@@ -80,8 +85,10 @@ class InMemoryAuditTaskStore:
         department: str = "",
         expense_type: str = "",
         note: str = "",
+        title: str = "",
     ) -> AuditTask:
         now = _now()
+        explicit_title = sanitize_title(title)
         task = AuditTask(
             task_id=f"task-{uuid4().hex[:12]}",
             status="CREATED",
@@ -91,6 +98,9 @@ class InMemoryAuditTaskStore:
             department=department,
             expense_type=expense_type,
             note=note,
+            title=explicit_title or build_report_title(applicant=applicant, expense_type=expense_type,
+                                                        event=note, task_id=""),
+            title_locked=bool(explicit_title),
         )
         self._tasks[task.task_id] = task
         return task
@@ -100,6 +110,32 @@ class InMemoryAuditTaskStore:
         if applicant:
             tasks = [task for task in tasks if task.applicant == applicant]
         return tasks
+
+    def set_title(self, task_id: str, title: str, locked: bool = True) -> AuditTask:
+        """人工命名/改名:锁定后审核结果不再自动覆盖名称。"""
+        task = self.require_task(task_id)
+        cleaned = sanitize_title(title)
+        task.title = cleaned
+        task.title_locked = locked and bool(cleaned)
+        task.updated_at = _now()
+        return task
+
+    def _apply_auto_title(self, task: AuditTask, report: AuditReport) -> None:
+        """审核完成后按抽取字段补全名称(日期区间 人物 事件);用户命名过则不覆盖。
+
+        人物优先用任务元数据里用户填写的申请人,缺失时才用材料抽取到的姓名。
+        """
+        if task.title_locked:
+            return
+        auto_title = title_from_fields(
+            report.fields,
+            expense_type=task.expense_type,
+            event=task.note,
+            task_id=task.task_id,
+            applicant=task.applicant or None,
+        )
+        if auto_title:
+            task.title = auto_title
 
     def get_task(self, task_id: str) -> AuditTask | None:
         return self._tasks.get(task_id)
@@ -118,6 +154,7 @@ class InMemoryAuditTaskStore:
         task.status = "COMPLETED"
         task.review_items = [_review_item_from_risk(task.task_id, risk) for risk in report.risks]
         task.updated_at = _now()
+        self._apply_auto_title(task, report)
         return task
 
     def save_field_correction(self, task_id: str, field_name: str, corrected_value: str, reason: str) -> FieldCorrection:
@@ -269,6 +306,8 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
         ("department", "TEXT DEFAULT ''"),
         ("expense_type", "TEXT DEFAULT ''"),
         ("note", "TEXT DEFAULT ''"),
+        ("title", "TEXT DEFAULT ''"),
+        ("title_locked", "INTEGER NOT NULL DEFAULT 0"),
     )
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
@@ -284,8 +323,12 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
         department: str = "",
         expense_type: str = "",
         note: str = "",
+        title: str = "",
     ) -> AuditTask:
         now = _now()
+        explicit_title = sanitize_title(title)
+        resolved_title = explicit_title or build_report_title(applicant=applicant, expense_type=expense_type,
+                                                             event=note, task_id="")
         task = AuditTask(
             task_id=f"task-{uuid4().hex[:12]}",
             status="CREATED",
@@ -295,13 +338,15 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
             department=department,
             expense_type=expense_type,
             note=note,
+            title=resolved_title,
+            title_locked=bool(explicit_title),
         )
         with self._lock, self._connection() as conn:
             conn.execute(
                 "INSERT INTO audit_tasks(task_id, status, created_at, updated_at, applicant, department,"
-                " expense_type, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                " expense_type, note, title, title_locked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (task.task_id, task.status, _dump_dt(now), _dump_dt(now),
-                 applicant, department, expense_type, note),
+                 applicant, department, expense_type, note, resolved_title, int(task.title_locked)),
             )
             self._insert_event(conn, task.task_id, "TASK_CREATED", "创建审核任务")
         return self.require_task(task.task_id)
@@ -343,6 +388,8 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
             department=row["department"] or "",
             expense_type=row["expense_type"] or "",
             note=row["note"] or "",
+            title=row["title"] or "",
+            title_locked=bool(row["title_locked"]),
             files=[StoredFile(file_name=item["file_name"], content=item["content"]) for item in file_rows],
             report=AuditReport.model_validate_json(row["report_json"]) if row["report_json"] else None,
             error=row["error"],
@@ -387,9 +434,11 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
         return self.require_task(task_id)
 
     def save_report(self, task_id: str, report: AuditReport) -> AuditTask:
-        self.require_task(task_id)
+        task = self.require_task(task_id)
         now = _now()
         review_items = [_review_item_from_risk(task_id, risk) for risk in report.risks]
+        # 未人工命名时按抽取字段自动补全名称(日期区间 人物 事件)
+        self._apply_auto_title(task, report)
         with self._lock, self._connection() as conn:
             conn.execute("DELETE FROM review_items WHERE task_id = ?", (task_id,))
             conn.executemany(
@@ -412,10 +461,22 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
                 ],
             )
             conn.execute(
-                "UPDATE audit_tasks SET status = ?, updated_at = ?, report_json = ?, error = NULL WHERE task_id = ?",
-                ("COMPLETED", _dump_dt(now), report.model_dump_json(), task_id),
+                "UPDATE audit_tasks SET status = ?, updated_at = ?, report_json = ?, error = NULL,"
+                " title = ?, title_locked = ? WHERE task_id = ?",
+                ("COMPLETED", _dump_dt(now), report.model_dump_json(),
+                 task.title, int(task.title_locked), task_id),
             )
             self._insert_event(conn, task_id, "AUDIT_COMPLETED", f"审核完成：{report.status}，风险数：{len(report.risks)}")
+        return self.require_task(task_id)
+
+    def set_title(self, task_id: str, title: str, locked: bool = True) -> AuditTask:
+        task = super().set_title(task_id, title, locked)
+        with self._lock, self._connection() as conn:
+            conn.execute(
+                "UPDATE audit_tasks SET title = ?, title_locked = ?, updated_at = ? WHERE task_id = ?",
+                (task.title, int(task.title_locked), _dump_dt(task.updated_at), task_id),
+            )
+            self._insert_event(conn, task_id, "TASK_RENAMED", f"报销单名称改为：{task.title}")
         return self.require_task(task_id)
 
     def save_field_correction(self, task_id: str, field_name: str, corrected_value: str, reason: str) -> FieldCorrection:

@@ -33,13 +33,22 @@ class TaskSummary(BaseModel):
     applicant: str = ""
     department: str = ""
     expense_type: str = ""
+    #: 报销单展示名(日期区间 人物 事件);task_id 仅作技术编号
+    title: str = ""
 
 
 class CreateTaskRequest(BaseModel):
     applicant: str = ""
     department: str = ""
     expense_type: str = ""
+    #: 备注/事由:既作为任务备注,也参与报销单命名(如"住宿报销")
     note: str = ""
+    #: 显式命名(留空则由"日期+人物+事件"自动生成)
+    title: str = ""
+
+
+class RenameTaskRequest(BaseModel):
+    title: str
 
 
 def _current_user(request: Request):
@@ -132,8 +141,19 @@ def create_audit_task(request: Request, payload: CreateTaskRequest | None = None
         department=payload.department,
         expense_type=payload.expense_type,
         note=payload.note,
+        title=payload.title,
     )
     return _task_summary(task)
+
+
+@app.patch("/api/v1/audit-tasks/{task_id}", response_model=TaskSummary)
+def rename_audit_task(task_id: str, request: RenameTaskRequest) -> TaskSummary:
+    """给报销单改名(客户视角的名称),改名后不再被审核结果自动覆盖。"""
+    _require_task(task_id)
+    title = request.title.strip()
+    if not title:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="名称不能为空")
+    return _task_summary(task_store.set_title(task_id, title))
 
 
 @app.get("/api/v1/audit-tasks", response_model=TaskListResponse)
@@ -266,4 +286,5 @@ def _task_summary(task: AuditTask) -> TaskSummary:
         applicant=task.applicant,
         department=task.department,
         expense_type=task.expense_type,
+        title=task.title,
     )

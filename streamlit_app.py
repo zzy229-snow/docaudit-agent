@@ -11,6 +11,7 @@ from app.config import load_environment
 from app.evaluation.runner import run_evaluation
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
 from app.services.report_exporter import build_html_report
+from app.services.task_naming import build_report_title, safe_file_name
 
 load_dotenv()
 
@@ -23,6 +24,15 @@ DEMO_CASES = {
     "缺少付款凭证": "missing_payment",
     "主体不一致但金额正常": "subject_mismatch",
     "发票日期超出行程": "date_out_of_range",
+}
+
+#: 新建审核可选报销类型 -> 名称里的"事件"
+EXPENSE_TYPES = {
+    "住宿报销": "HOTEL",
+    "差旅报销": "TRAVEL",
+    "交通报销": "TRANSPORT",
+    "采购报销": "PURCHASE",
+    "招待报销": "MEAL",
 }
 
 # 视图导航(状态驱动,便于"打开任务"直接跳转到审核详情)
@@ -145,12 +155,30 @@ def selected_task() -> AuditTask | None:
     return task_store.get_task(task_id)
 
 
-def create_task_with_files(files: list[tuple[str, bytes]]) -> AuditTask:
-    task = task_store.create_task()
+def create_task_with_files(
+    files: list[tuple[str, bytes]],
+    applicant: str = "",
+    department: str = "",
+    expense_type: str = "",
+    note: str = "",
+    title: str = "",
+) -> AuditTask:
+    task = task_store.create_task(
+        applicant=applicant,
+        department=department,
+        expense_type=expense_type,
+        note=note,
+        title=title,
+    )
     for file_name, content in files:
         task = task_store.add_file(task.task_id, file_name, content)
     st.session_state["selected_task_id"] = task.task_id
     return task
+
+
+def task_label(task: AuditTask) -> str:
+    """客户视角的名称:优先报销单名称,没有时回退技术编号。"""
+    return task.title or task.task_id
 
 
 def request_open(task_id: str) -> None:
@@ -195,21 +223,25 @@ def show_status_badge(task: AuditTask) -> None:
 
 
 def render_task_table(tasks: list[AuditTask]):
-    """任务表格:单击任意行即可打开该任务详情。"""
+    """任务表格:单击任意行即可打开该任务详情。
+
+    第一列是客户视角的"报销单名称"(日期区间+人物+事件),技术编号放到最后一列。
+    """
     return st.dataframe(
         [
             {
-                "任务ID": task.task_id,
-                "任务状态": status_label(task.status),
+                "报销单名称": task_label(task),
                 "审核结论": result_label(task),
+                "任务状态": status_label(task.status),
                 "文件数": len(task.files),
                 "风险数": len(task.report.risks) if task.report else 0,
                 "复核进度": review_progress(task),
                 "更新时间": task.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "技术编号": task.task_id,
             }
             for task in tasks
         ],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         on_select="rerun",
         selection_mode="single-row",
@@ -295,7 +327,7 @@ def render_fields(summary: AuditExplanationSummary, task: AuditTask) -> None:
             }
             for field in summary.key_fields
         ],
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -355,7 +387,7 @@ def render_report_tabs(task: AuditTask) -> None:
                 }
                 for check in summary.checks
             ],
-            use_container_width=True,
+            width="stretch",
             hide_index=True,
         )
 
@@ -376,15 +408,17 @@ def render_report_tabs(task: AuditTask) -> None:
 
     with tab_json:
         html_report = build_html_report(task, events=task_store.list_events(task.task_id))
+        report_stem = safe_file_name(task_label(task), fallback=task.task_id)
         st.download_button(
             "下载 HTML 正式报告",
             data=html_report,
-            file_name=f"{task.task_id}-docaudit-report.html",
+            file_name=f"{report_stem}-docaudit-report.html",
             mime="text/html",
             type="primary",
         )
         payload = {
             "task_id": task.task_id,
+            "title": task.title,
             "status": task.status,
             "summary": summary.model_dump(),
             "events": [
@@ -424,8 +458,13 @@ with st.sidebar:
     st.header("快速演示")
     demo_label = st.selectbox("选择虚构样例", list(DEMO_CASES))
     if st.button("创建样例任务", type="primary"):
-        task = create_task_with_files(load_demo_files(DEMO_CASES[demo_label]))
-        st.success(f"已创建任务：{task.task_id}")
+        task = create_task_with_files(
+            load_demo_files(DEMO_CASES[demo_label]),
+            applicant="张三",
+            department="市场部",
+            expense_type="HOTEL",
+        )
+        st.success(f"已创建报销单：{task_label(task)}")
         request_open(task.task_id)
 
     st.divider()
@@ -473,7 +512,7 @@ if view == NAV_TASKS:
                 request_open(picked.task_id)
 
         task_options = {
-            f"{task.task_id} · {status_label(task.status)} · {result_label(task)} · {review_progress(task)}": task.task_id
+            f"{task_label(task)} · {status_label(task.status)} · {result_label(task)} · {review_progress(task)}": task.task_id
             for task in tasks
         }
         current = st.selectbox("或从列表选择任务", list(task_options))
@@ -484,6 +523,25 @@ if view == NAV_TASKS:
 
 elif view == NAV_CREATE:
     st.subheader("新建审核任务")
+    st.write(
+        "先填报销信息，名称会按 **日期区间 + 人物 + 事件** 自动生成"
+        "（例如 `2026.9.18-9.19 张三 住宿报销`）；日期在运行审核后按材料自动补全。"
+    )
+    info_left, info_mid, info_right = st.columns(3)
+    expense_label = info_left.selectbox("报销类型", list(EXPENSE_TYPES))
+    applicant = info_mid.text_input("申请人", placeholder="张三")
+    department = info_right.text_input("部门", placeholder="市场部")
+    event_note = st.text_input(
+        "备注 / 事由（作为名称里的“事件”，可留空按报销类型生成）",
+        placeholder="例如：住宿报销 / 9月上海出差",
+    )
+    preview = build_report_title(
+        applicant=applicant,
+        expense_type=EXPENSE_TYPES[expense_label],
+        event=event_note,
+    )
+    st.caption(f"报销单名称预览：{preview or '（运行审核后按材料自动生成）'}")
+
     st.write("手动上传真实或脱敏材料时，文件名建议包含 `invoice`、`payment`、`approval`，便于当前规则识别材料类型。")
     uploads = st.file_uploader(
         "上传材料",
@@ -494,8 +552,14 @@ elif view == NAV_CREATE:
         if not uploads:
             st.warning("请先上传材料。")
         else:
-            task = create_task_with_files([(file.name, file.getvalue()) for file in uploads])
-            st.success(f"已创建任务：{task.task_id}（已切换到审核详情）")
+            task = create_task_with_files(
+                [(file.name, file.getvalue()) for file in uploads],
+                applicant=applicant,
+                department=department,
+                expense_type=EXPENSE_TYPES[expense_label],
+                note=event_note,
+            )
+            st.success(f"已创建报销单：{task_label(task)}（已切换到审核详情）")
             request_open(task.task_id)
 
 else:
@@ -504,12 +568,24 @@ else:
         st.info("请先在“任务中心”选择任务，或创建一个新任务。")
     else:
         top_left, top_right = st.columns([3, 1])
-        top_left.subheader(f"审核详情 · {task.task_id}")
+        top_left.subheader(task_label(task))
+        top_left.caption(f"技术编号：{task.task_id}")
         if top_right.button("刷新"):
             st.rerun()
         if top_left.button("返回任务中心"):
             switch_view(NAV_TASKS)
         show_status_badge(task)
+
+        with st.expander("报销单名称"):
+            st.caption("按“日期区间 + 人物 + 事件”命名；手动改过的名称不会被审核结果覆盖。")
+            renamed = st.text_input("名称", value=task.title, key=f"title-{task.task_id}")
+            if st.button("保存名称", key=f"rename-{task.task_id}"):
+                if not renamed.strip():
+                    st.warning("名称不能为空。")
+                else:
+                    task_store.set_title(task.task_id, renamed)
+                    st.success("名称已更新。")
+                    st.rerun()
 
         meta_left, meta_mid, meta_right, meta_fourth = st.columns(4)
         meta_left.metric("任务状态", status_label(task.status))
@@ -520,7 +596,7 @@ else:
         with st.expander("材料清单", expanded=True):
             st.dataframe(
                 [{"文件名": item.file_name, "大小KB": round(len(item.content) / 1024, 2)} for item in task.files],
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 

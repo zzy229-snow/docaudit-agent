@@ -13,13 +13,14 @@ def build_html_report(task: AuditTask, events: list[AuditEvent] | None = None) -
         raise ValueError("Audit task has not completed")
     summary = build_audit_summary(task.report)
     events = events or []
+    display_title = task.title or task.task_id
     return "\n".join(
         [
             "<!doctype html>",
             "<html lang=\"zh-CN\">",
             "<head>",
             "<meta charset=\"utf-8\">",
-            f"<title>DocAudit 审核报告 - {escape(task.task_id)}</title>",
+            f"<title>DocAudit 审核报告 - {escape(display_title)}</title>",
             _style(),
             "</head>",
             "<body>",
@@ -43,12 +44,13 @@ def _header(task: AuditTask, summary: AuditExplanationSummary) -> str:
     generated_at = datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
     status_class = "pass" if summary.status == "PASS" else "review"
     status_text = "通过" if summary.status == "PASS" else "需要复核"
+    display_title = task.title or task.task_id
     return f"""
 <header>
   <div>
     <p class="eyebrow">DocAudit Agent</p>
-    <h1>企业报销审核报告</h1>
-    <p class="muted">任务编号：{escape(task.task_id)} ｜ 生成时间：{escape(generated_at)}</p>
+    <h1>{escape(display_title)}</h1>
+    <p class="muted">企业报销审核报告 ｜ 技术编号：{escape(task.task_id)} ｜ 生成时间：{escape(generated_at)}</p>
   </div>
   <div class="status {status_class}">{status_text}</div>
 </header>
