@@ -157,3 +157,5 @@ class AuditState(TypedDict, total=False):
     # 人工修正与运行时起点
     field_overrides: dict[str, dict]
     started_at: float
+    #: 任务上下文(部门/任务日期),用于制度版本与部门过滤(FR-304)
+    user_context: dict

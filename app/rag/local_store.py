@@ -19,8 +19,9 @@ from app.config import repo_root
 POLICY_DIR = repo_root() / "data" / "policies"
 
 
-def retrieve_local(query: str, limit: int = 3) -> list[PolicyEvidence]:
+def retrieve_local(query: str, limit: int = 3, extra_chunks: list[PolicyChunk] | None = None) -> list[PolicyEvidence]:
     chunks = chunk_policy_documents(POLICY_DIR)
+    chunks = [*chunks, *(extra_chunks or [])]
     if not query.strip() or not chunks:
         return []
     query_tokens = _tokenize(query)

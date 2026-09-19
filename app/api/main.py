@@ -4,6 +4,8 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.agent.graph import run_audit
+from app.api.evaluations import router as evaluations_router
+from app.api.policies import router as policies_router
 from app.api.store import AuditEvent, AuditTask, FieldCorrection, ReviewItem, ReviewStatus, task_store
 from app.models.audit import CheckResult, RiskItem
 from app.models.field import ExtractedField
@@ -13,6 +15,8 @@ from app.services.report_exporter import build_html_report
 load_dotenv()
 
 app = FastAPI(title="DocAudit Agent API", version="0.1.0")
+app.include_router(policies_router)
+app.include_router(evaluations_router)
 
 
 class TaskSummary(BaseModel):

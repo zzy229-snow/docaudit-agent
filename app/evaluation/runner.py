@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from app.agent.graph import run_audit
 from app.services.invoice_registry import isolated_registry
+from app.services.policy_store import isolated_store as isolated_policy_store
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -24,12 +25,15 @@ DEFAULT_CASES_PATH = REPO_ROOT / "data" / "evaluation" / "cases.json"
 
 
 @contextmanager
-def _maybe_isolated_registry(isolate: bool) -> Iterator[None]:
-    """按需隔离发票查重登记表,保证重复发票用例每次运行都从干净历史开始。"""
+def _isolated_eval_state(isolate: bool) -> Iterator[None]:
+    """评测期间隔离外部状态:发票查重登记表与已发布制度库都指向临时文件。
+
+    这样重复发票用例每次都从干净历史开始,已发布制度也不会影响基线结论。
+    """
     if not isolate:
         yield
         return
-    with isolated_registry():
+    with isolated_registry(), isolated_policy_store():
         yield
 
 
@@ -272,7 +276,7 @@ def run_evaluation(
     ``isolate_invoice_registry`` 默认开启:把发票查重登记表指向临时文件,
     这样重复发票用例在每次运行中都从干净历史开始,结论可复现。
     """
-    with _maybe_isolated_registry(isolate_invoice_registry):
+    with _isolated_eval_state(isolate_invoice_registry):
         cases = load_cases(cases_path)
         results = [run_case(case, repo_root=repo_root) for case in cases]
     total = len(results)

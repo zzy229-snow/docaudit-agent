@@ -59,8 +59,13 @@ def prepare_state(
     field_overrides: dict | None = None,
     task_id: str | None = None,
     timeout_seconds: float | None = None,
+    department: str | None = None,
+    as_of: str | None = None,
 ) -> dict:
-    """构造初始审核状态(§7.3 AuditState)。"""
+    """构造初始审核状态(§7.3 AuditState)。
+
+    ``department``/``as_of`` 进入 ``user_context``,供制度检索做部门与生效区间过滤(FR-304)。
+    """
     from time import perf_counter
 
     if not files:
@@ -78,6 +83,7 @@ def prepare_state(
         "field_overrides": field_overrides or {},
         "control": AgentControl(**control_kwargs),
         "started_at": perf_counter(),
+        "user_context": {"department": department, "as_of": as_of},
     }
 
 

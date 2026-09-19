@@ -42,6 +42,8 @@ python -m uvicorn app.api.main:app --reload --port 8102
 - FastAPI 任务接口：创建任务、上传材料、运行审核、字段修正、人工复核决策。
 - 生产化任务基础：SQLite 持久化任务、材料、报告、人工修正、复核项和审计事件。
 - 报告导出：支持通过 API 和 Streamlit 下载 HTML 正式审核报告。
+- 制度管理接口：上传制度（TXT/DOCX/PDF）→ 自动切片入库 → 发布/停用/版本切换，检索按部门与生效区间过滤（FR-301~FR-304）。
+- 离线评测接口：`POST /api/v1/evaluations/run` 直接返回回归指标与逐例结果（可输出 Markdown）。
 - LLM 接入护栏：JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。
 - 评测基线：57 条端到端样例（含重复发票/制度无依据/指令注入/OCR困难/手写关键词），输出 JSON/Markdown 报告，并统计风险 P/R/F1、工具成功率、人工复核率与 P50/P95 耗时。
 

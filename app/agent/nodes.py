@@ -102,8 +102,11 @@ def extract(state: dict) -> dict:
 def retrieve(state: dict) -> dict:
     started_at = start_node(state, "retrieve", "开始检索制度证据")
     city = state["fields"].get("travel_city")
+    context = state.get("user_context") or {}
     evidence = retrieve_policy(str(city.value) if city else None,
-                               files=state.get("files"))
+                               files=state.get("files"),
+                               department=context.get("department"),
+                               as_of=context.get("as_of"))
     record_tool_call(
         state,
         "retrieve_policy",
