@@ -61,6 +61,10 @@ python -m app.services.model_smoke
 
 配置方式见 `docs/OCR_INTEGRATION.md`。
 
+## 真实 RAG
+
+默认 `RAG_MODE=mock` 适合离线测试。生产化演示建议切换到 `RAG_MODE=local`，系统会从 `data/policies` 的制度切片中进行本地真实检索；如果已经准备好 bge-m3 和 Milvus Lite，也可以使用 `RAG_MODE=milvus`。配置和评测方式见 `docs/RAG_INTEGRATION.md`。
+
 ## 测试
 
 ```bash
@@ -83,7 +87,7 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 ## 当前限制
 
-此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；多模态模型、生产级向量检索、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；RAG 已提供本地真实检索和 Milvus 混合检索接入口；多模态模型、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
 ## 演示与发布
 
