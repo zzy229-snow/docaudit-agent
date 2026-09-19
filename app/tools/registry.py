@@ -2,6 +2,7 @@ from app.models.audit import PolicyEvidence
 from app.tools.amount_tool import compare_amounts, compare_hotel_limit
 from app.tools.date_tool import compare_date_range
 from app.tools.document_tool import check_required_documents
+from app.tools.duplicate_tool import check_duplicate_invoice
 from app.tools.schema import RegisteredTool, ToolInputSchema, ToolSpec
 from app.tools.subject_tool import compare_subject
 
@@ -28,6 +29,15 @@ def _applicant_match(
     payment_party: str | None = None,
 ):
     return compare_subject(applicant_name, invoice_buyer, payment_party)
+
+
+def _duplicate_invoice(
+    invoice_number: str | None,
+    invoice_date: str | None = None,
+    invoice_amount: str | None = None,
+    task_id: str | None = None,
+):
+    return check_duplicate_invoice(invoice_number, invoice_date, invoice_amount, task_id)
 
 
 TOOL_REGISTRY: dict[str, RegisteredTool] = {
@@ -89,6 +99,20 @@ TOOL_REGISTRY: dict[str, RegisteredTool] = {
             ],
         ),
         handler=_applicant_match,
+    ),
+    "check_duplicate_invoice": RegisteredTool(
+        spec=ToolSpec(
+            name="check_duplicate_invoice",
+            description="按发票号码+开票日期+金额查询历史记录,命中时返回关联任务编号",
+            category="database",
+            inputs=[
+                ToolInputSchema(name="invoice_number", description="发票号码"),
+                ToolInputSchema(name="invoice_date", description="开票日期", required=False),
+                ToolInputSchema(name="invoice_amount", description="发票金额", required=False),
+                ToolInputSchema(name="task_id", description="当前任务ID,用于排除自身记录", required=False),
+            ],
+        ),
+        handler=_duplicate_invoice,
     ),
 }
 

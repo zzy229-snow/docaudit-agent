@@ -33,6 +33,9 @@ parse_documents -> extract -> retrieve -> check -> report
 
 固定流程的好处是稳定、可复现，适合作为财务审核类 Agent 的主干。LangGraph 后续可以承载状态迁移和条件边，但不应一开始就把所有业务判断交给自由 ReAct 循环。
 
+> 更新（后续提交）：已按本节思路用真实 LangGraph `StateGraph` 落地节点与条件边，
+> 并补充 `plan` / `critic` / `route_review` 节点，详见下方第 12 节。
+
 ## 3. 新增状态结构
 
 文件：`app/models/state.py`
@@ -233,3 +236,67 @@ feat(agent): add tool schema registry
 - 功能分支先通过本地测试。
 - 推送到 Gitee 后发起合并到 `develop`。
 - `develop` 集成测试稳定后，再合并到 `main` 作为演示稳定版。
+
+## 12. LangGraph 落地与节点补齐（PRD §7.2/§7.3/§7.4）
+
+### 12.1 节点与条件边
+
+`app/agent/langgraph_workflow.py` 用真实 `StateGraph` 编排，节点集合与
+`app/agent/pipeline.py::NODE_SEQUENCE` 完全一致：
+
+```text
+parse_documents → extract → retrieve → plan → check → critic
+   → route_review ─┬─(continue)→ report → END
+                   ├─(review)  → report → END
+                   └─(fail)    → report → END
+```
+
+| 节点 | 职责 | 产物 |
+| --- | --- | --- |
+| `parse_documents` | 文件校验/解析/困难区域/注入检测 | `Document[]` + `hard_regions` + `injection_hits` |
+| `extract` | 字段抽取、证据绑定、人工修正覆盖 | `fields` |
+| `retrieve` | 制度检索与元数据过滤 | `policy_evidence` |
+| `plan` | 生成**受控**审核计划（工具白名单校验） | `AuditPlan` |
+| `check` | 执行 6 个确定性工具（失败按指数退避重试） | `checks` + `risks` + `human_review_items` |
+| `critic` | 复核完整性、证据覆盖率、制度引用 | `CritiqueResult` |
+| `route_review` | 决定 continue / review / fail | `control.route` |
+| `report` | 生成结构化报告 | `AuditReport`（含 plan/critique/失败原因） |
+
+三种路由都收敛到 `report`，由 `control.route` 决定最终状态（`fail` → `FAILED`），
+因此 LangGraph 版与顺序版结论一致；`tests/test_langgraph_workflow.py` 逐用例比对两者
+的状态、风险集合、字段值与计划步骤。
+
+### 12.2 引擎切换
+
+| 环境变量 | 行为 |
+| --- | --- |
+| `AGENT_ENGINE=langgraph`（默认） | 使用 LangGraph `StateGraph` |
+| `AGENT_ENGINE=sequential` | 顺序执行固定主流程（对照/排错） |
+| langgraph 未安装或构建失败 | 自动回退顺序执行，并在 trace 记录原因 |
+
+### 12.3 防循环与预算（PRD §7.4）
+
+| 规则 | 实现 | 触发动作 |
+| --- | --- | --- |
+| 最大节点步数 | `AgentControl.max_steps`（默认 10）+ `require_next_step` | 抛错终止并记录 `terminated_reason` |
+| 相同工具 + 相同参数连续 2 次 | `state.no_progress_detected` | `route_review` 判 `fail`，报告 `FAILED` |
+| 单工具重试 | `AgentControl.max_tool_retries`（默认 2，仅幂等工具）+ 指数退避 | 记录 `tool_retry`，耗尽后向上抛出 |
+| 单任务超时 | `AgentControl.timeout_seconds`（默认 120 秒） | `route_review` 判 `fail` |
+| Token 预算 | `AgentControl.token_budget` / `tokens_used` | `route_review` 判 `fail` |
+
+**已知缺口（据实说明）**：`tokens_used` 目前没有数据源——`ModelGateway` 未返回
+usage 字段，mock 链路也不消耗 Token，因此 Token 预算门槛在未接入返回 usage 的
+网关前不会触发；字段与判定逻辑已就位，接入后即可生效。LangGraph 的
+checkpoint 持久化（跨进程恢复）仍未启用，任务状态目前由 SQLite 任务存储承担。
+
+### 12.4 测试覆盖
+
+`tests/test_langgraph_workflow.py`：
+
+- 引擎选择、未知引擎回退、langgraph 缺失时回退顺序执行；
+- LangGraph 与顺序执行结论一致（4 组样例）；
+- `max_steps` 在 LangGraph 路径同样生效；
+- 计划白名单校验与 `may_skip` 标记；
+- critic 的证据覆盖率与制度引用检查；
+- route_review 的 continue/review/fail（无进展、超时、Token 预算）；
+- 工具重试成功与重试耗尽抛出。

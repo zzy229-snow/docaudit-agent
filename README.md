@@ -17,6 +17,10 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
+一键启动（含依赖安装与就绪检查）：`bash scripts/start.sh`（Windows：`scripts\start.bat`），
+停止：`bash scripts/stop.sh`。Docker Compose 单机部署：`docker compose up -d --build`
+（API 8000 / 工作台 8500），详见 `docs/DEPLOYMENT.md`。
+
 打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元、发票购买方与申请人不一致和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
 
 Streamlit 页面已升级为审核工作台形态：左侧可创建 5 组虚构样例任务，主界面包含任务中心、新建审核、审核详情、风险看板、字段证据、人工复核、事件时间线、HTML 正式报告和 JSON 审核包下载。
@@ -31,14 +35,23 @@ python -m uvicorn app.api.main:app --reload --port 8102
 
 ## 已完成能力
 
-- 五项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性。
+- 六项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性、重复发票查重。
+- 风险四级分级：HIGH/MEDIUM/LOW/INFO，HIGH 必须人工复核、LOW/INFO 仅提示（PRD 附录A）。
+- 制度无依据不判合规：检索不到适用条款时输出“缺少规则依据，需人工确认”（PRD §16 / AC-05）。
+- 指令注入防护：材料正文命中“忽略规则/直接判合规/跳过检查”等话术时记录 `PROMPT_INJECTION`（HIGH），但不改写任何确定性结论（PRD §15）。
+- 重复发票查重：按发票号码+开票日期+金额查询本地登记表，命中返回关联任务编号；登记表路径由 `INVOICE_REGISTRY_PATH` 控制（默认 `data/runtime/invoice_registry.sqlite3`）。
+- 文本材料质量检测：TXT/DOCX/XLSX 正文含签字/手写/盖章关键词或乱码率过高时标记困难材料并转人工（PRD §6.4）。
 - 可解释报告：风险原因、字段证据、制度依据、检查项状态、Agent trace。
 - Streamlit 演示页：内置 5 组虚构样例，支持 JSON 报告下载。
 - FastAPI 任务接口：创建任务、上传材料、运行审核、字段修正、人工复核决策。
 - 生产化任务基础：SQLite 持久化任务、材料、报告、人工修正、复核项和审计事件。
 - 报告导出：支持通过 API 和 Streamlit 下载 HTML 正式审核报告。
+- 制度管理接口：上传制度（TXT/DOCX/PDF）→ 自动切片入库 → 发布/停用/版本切换，检索按部门与生效区间过滤（FR-301~FR-304）。
+- 最小可用 RBAC：`AUTH_MODE=enforce` 后按角色（申请人/审核员/制度管理员/管理员/开发测试）与任务归属鉴权，越权 404 不泄露存在性并写审计事件（§2/§15/AC-09）。
+- 部署交付：Docker Compose 单机部署 + 一键启动脚本（`scripts/start.sh`、`scripts/start.bat`）。
+- 离线评测接口：`POST /api/v1/evaluations/run` 直接返回回归指标与逐例结果（可输出 Markdown）。
 - LLM 接入护栏：JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。
-- 评测基线：5 条端到端样例，可输出 JSON/Markdown 报告。
+- 评测基线：57 条端到端样例（含重复发票/制度无依据/指令注入/OCR困难/手写关键词），输出 JSON/Markdown 报告，并统计风险 P/R/F1、工具成功率、人工复核率与 P50/P95 耗时。
 
 ## 模型API
 
@@ -88,7 +101,7 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 ## 当前限制
 
-此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；RAG 已提供本地真实检索和 Milvus 混合检索接入口；多模态模型、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；RAG 已提供本地真实检索和 Milvus 混合检索接入口；Agent 主流程已用真实 LangGraph `StateGraph` 编排（`AGENT_ENGINE=langgraph`，缺失时回退顺序执行）。多模态模型、LangGraph checkpoint 持久化、RBAC 权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
 ## 演示与发布
 

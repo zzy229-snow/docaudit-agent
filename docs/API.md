@@ -128,17 +128,55 @@ API 测试会覆盖：
 | `policy_evidence` | 制度条款引用 |
 | `trace` | Agent 执行轨迹 |
 
-## 8. 当前限制
+## 8. 制度管理与评测接口（新增）
+
+### 8.1 制度管理（PRD §5.4 FR-301~FR-304）
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/api/v1/policies` | 上传制度 TXT/DOCX/PDF，录入名称、版本、生效时间、部门、费用类型；立即切片入库，状态 `draft` |
+| GET | `/api/v1/policies` | 制度列表（可按 `status_filter` 过滤） |
+| GET | `/api/v1/policies/{policy_id}` | 制度详情（含切片数） |
+| POST | `/api/v1/policies/{policy_id}/publish` | 发布索引；`switch_version=true` 时同时停用同制度名旧版本 |
+| POST | `/api/v1/policies/{policy_id}/disable` | 停用制度，历史版本保留可追溯 |
+
+- 元数据不完整或无切片时拒绝发布（FR-301/302）；
+- 停用/切换版本只改状态，不物理删除（FR-303）；
+- 检索侧按部门、费用类型与生效区间过滤（FR-304）：`retrieve_policy(city, department=..., as_of=...)`，
+  审核流程可通过 `run_audit(..., department=..., as_of=...)` 传入任务上下文；
+- 切片策略与基线制度一致：按章/条/款切分、保留父标题路径 `section_path`、表格按行切分并保留表头；
+- 制度库位置由 `POLICY_STORE_PATH` 控制（默认 `data/runtime/policies.sqlite3`）。
+
+示例：
+
+```bash
+curl -X POST http://127.0.0.1:8102/api/v1/policies \
+  -F "file=@travel_policy.txt" -F "name=差旅住宿制度" -F "version=V1" \
+  -F "effective_from=2026-01-01" -F "department=ALL" -F "expense_type=TRAVEL"
+curl -X POST "http://127.0.0.1:8102/api/v1/policies/UP-XXXXXXXX/publish?switch_version=true"
+```
+
+### 8.2 离线评测（PRD §12.2）
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| POST | `/api/v1/evaluations/run` | 运行回归评测，返回指标（可含逐例结果或 Markdown） |
+
+请求体（可省略）：`{"cases_path": "data/evaluation/cases.json", "format": "json"}`。
+`cases_path` 必须位于仓库目录内，否则返回 400（防路径穿越）；文件不存在返回 404。
+
+## 9. 当前限制
 
 - 当前 SQLite 是本地单机持久化，不适合作为多实例部署的共享数据库。
 - 尚未实现用户、角色和权限控制。
 - 字段修正后的第一版实现采用全量重跑，尚未做依赖图局部重跑。
 - 当前报告导出为 HTML，尚未提供 PDF 原生生成。
 - 尚未实现幂等请求 ID、文件去重和任务恢复锁。
+- RAG_MODE=milvus 时，新发布制度的向量索引重建仍需要单独运行构建脚本（local 模式即时生效）。
 
 这些限制是当前生产化改造的下一批边界，不应在对外说明中夸大。
 
-## 9. 后续建议
+## 10. 后续建议
 
 优先级建议：
 

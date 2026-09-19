@@ -2,15 +2,28 @@ import unittest
 import tempfile
 from pathlib import Path
 
-from app.evaluation.runner import EvaluationCase, run_case, run_evaluation, write_report
+from app.evaluation.runner import (
+    DEFAULT_CASES_PATH,
+    EvaluationCase,
+    load_cases,
+    run_case,
+    run_evaluation,
+    write_report,
+)
+from app.services.invoice_registry import isolate_registry
 
 
 class EvaluationRunnerTests(unittest.TestCase):
+    def setUp(self):
+        # run_case 不经过 run_evaluation 的隔离,单独调用时需要自己隔离登记表(FR-204)
+        isolate_registry()
+
     def test_default_cases_pass(self):
         report = run_evaluation()
 
-        self.assertEqual(report.metrics.total_cases, 50)
-        self.assertEqual(report.metrics.passed_cases, 50)
+        self.assertGreaterEqual(report.metrics.total_cases, 50)
+        self.assertEqual(report.metrics.total_cases, len(load_cases(DEFAULT_CASES_PATH)))
+        self.assertEqual(report.metrics.passed_cases, report.metrics.total_cases)
         self.assertEqual(report.metrics.failed_cases, 0)
         self.assertEqual(report.metrics.pass_rate, 1.0)
         self.assertEqual(report.metrics.status_accuracy, 1.0)

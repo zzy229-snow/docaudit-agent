@@ -1,0 +1,60 @@
+# DocAudit Agent 单机部署(PRD §3 MVP「Docker Compose 单机部署」/ §22.3 端口约定)
+#
+# 用法:
+#   docker compose up -d --build         # 启动 API(8000)与审核工作台(8500)
+#   docker compose logs -f api           # 查看 API 日志
+#   docker compose exec api python -m unittest discover -s tests   # 容器内跑单测
+#   docker compose exec api python -m app.evaluation.runner --format markdown
+#
+# 环境变量:在本目录的 .env 中覆盖默认值(compose 会自动读取用于插值),
+# 例如 AUTH_MODE=enforce、RAG_MODE=local、MODEL_PROVIDER=mock。
+
+services:
+  api:
+    build: .
+    image: docaudit-agent:local
+    command: uvicorn app.api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      AGENT_ENGINE: ${AGENT_ENGINE:-langgraph}
+      AUDIT_TASK_STORE: sqlite
+      OCR_ENGINE: ${OCR_ENGINE:-mock}
+      RAG_MODE: ${RAG_MODE:-local}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-mock}
+      AUTH_MODE: ${AUTH_MODE:-off}
+      POLICY_STORE_PATH: /app/data/runtime/policies.sqlite3
+      INVOICE_REGISTRY_PATH: /app/data/runtime/invoice_registry.sqlite3
+    volumes:
+      # 任务库、发票登记表与制度库持久化到宿主机,容器重建不丢数据
+      - ./data/runtime:/app/data/runtime
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    restart: unless-stopped
+
+  web:
+    build: .
+    image: docaudit-agent:local
+    command: >
+      streamlit run streamlit_app.py
+      --server.port 8500 --server.address 0.0.0.0 --server.headless true
+    ports:
+      - "${WEB_PORT:-8500}:8500"
+    environment:
+      AUDIT_TASK_STORE: sqlite
+      OCR_ENGINE: ${OCR_ENGINE:-mock}
+      RAG_MODE: ${RAG_MODE:-local}
+      MODEL_PROVIDER: ${MODEL_PROVIDER:-mock}
+      AUTH_MODE: ${AUTH_MODE:-off}
+      POLICY_STORE_PATH: /app/data/runtime/policies.sqlite3
+      INVOICE_REGISTRY_PATH: /app/data/runtime/invoice_registry.sqlite3
+    volumes:
+      - ./data/runtime:/app/data/runtime
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped

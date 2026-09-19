@@ -4,12 +4,17 @@ from pathlib import Path
 
 from app.api.store import SQLiteAuditTaskStore
 from app.agent.graph import run_audit
+from app.services.invoice_registry import isolate_registry
 
 
 BASE = Path(__file__).resolve().parents[1] / "data" / "demo" / "normal"
 
 
 class SQLiteAuditTaskStoreTests(unittest.TestCase):
+    def setUp(self):
+        # 发票查重登记表隔离,避免用例之间互相污染(FR-204)
+        isolate_registry()
+
     def test_task_survives_store_recreation(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = Path(tmp) / "audit_tasks.sqlite3"

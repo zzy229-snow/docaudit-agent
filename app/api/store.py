@@ -63,20 +63,43 @@ class AuditTask:
     error: str | None = None
     corrections: dict[str, FieldCorrection] = field(default_factory=dict)
     review_items: list[ReviewItem] = field(default_factory=list)
+    #: FR-001:任务元数据(申请人/部门/报销类型/备注),同时用于 RBAC 对象级鉴权(§15)
+    applicant: str = ""
+    department: str = ""
+    expense_type: str = ""
+    note: str = ""
 
 
 class InMemoryAuditTaskStore:
     def __init__(self) -> None:
         self._tasks: dict[str, AuditTask] = {}
 
-    def create_task(self) -> AuditTask:
+    def create_task(
+        self,
+        applicant: str = "",
+        department: str = "",
+        expense_type: str = "",
+        note: str = "",
+    ) -> AuditTask:
         now = _now()
-        task = AuditTask(task_id=f"task-{uuid4().hex[:12]}", status="CREATED", created_at=now, updated_at=now)
+        task = AuditTask(
+            task_id=f"task-{uuid4().hex[:12]}",
+            status="CREATED",
+            created_at=now,
+            updated_at=now,
+            applicant=applicant,
+            department=department,
+            expense_type=expense_type,
+            note=note,
+        )
         self._tasks[task.task_id] = task
         return task
 
-    def list_tasks(self) -> list[AuditTask]:
-        return sorted(self._tasks.values(), key=lambda item: item.created_at, reverse=True)
+    def list_tasks(self, applicant: str | None = None) -> list[AuditTask]:
+        tasks = sorted(self._tasks.values(), key=lambda item: item.created_at, reverse=True)
+        if applicant:
+            tasks = [task for task in tasks if task.applicant == applicant]
+        return tasks
 
     def get_task(self, task_id: str) -> AuditTask | None:
         return self._tasks.get(task_id)
@@ -149,6 +172,10 @@ class InMemoryAuditTaskStore:
     def list_events(self, task_id: str) -> list[AuditEvent]:
         self.require_task(task_id)
         return []
+
+    def log_event(self, task_id: str, event_type: str, message: str) -> None:
+        """内存存储不保留事件(实现留空,SQlite 版持久化)。"""
+        return None
 
 
 class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
@@ -234,21 +261,60 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
                 );
                 """
             )
+            self._migrate(conn)
 
-    def create_task(self) -> AuditTask:
+    #: 旧库升级用:新增列(列名, 类型)
+    _TASK_EXTRA_COLUMNS = (
+        ("applicant", "TEXT DEFAULT ''"),
+        ("department", "TEXT DEFAULT ''"),
+        ("expense_type", "TEXT DEFAULT ''"),
+        ("note", "TEXT DEFAULT ''"),
+    )
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        """轻量迁移:已有 SQLite 库缺少任务元数据列时自动补齐(不需要 Alembic)。"""
+        existing = {row["name"] for row in conn.execute("PRAGMA table_info(audit_tasks)").fetchall()}
+        for column, ddl in self._TASK_EXTRA_COLUMNS:
+            if column not in existing:
+                conn.execute(f"ALTER TABLE audit_tasks ADD COLUMN {column} {ddl}")
+
+    def create_task(
+        self,
+        applicant: str = "",
+        department: str = "",
+        expense_type: str = "",
+        note: str = "",
+    ) -> AuditTask:
         now = _now()
-        task = AuditTask(task_id=f"task-{uuid4().hex[:12]}", status="CREATED", created_at=now, updated_at=now)
+        task = AuditTask(
+            task_id=f"task-{uuid4().hex[:12]}",
+            status="CREATED",
+            created_at=now,
+            updated_at=now,
+            applicant=applicant,
+            department=department,
+            expense_type=expense_type,
+            note=note,
+        )
         with self._lock, self._connection() as conn:
             conn.execute(
-                "INSERT INTO audit_tasks(task_id, status, created_at, updated_at) VALUES (?, ?, ?, ?)",
-                (task.task_id, task.status, _dump_dt(now), _dump_dt(now)),
+                "INSERT INTO audit_tasks(task_id, status, created_at, updated_at, applicant, department,"
+                " expense_type, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (task.task_id, task.status, _dump_dt(now), _dump_dt(now),
+                 applicant, department, expense_type, note),
             )
             self._insert_event(conn, task.task_id, "TASK_CREATED", "创建审核任务")
         return self.require_task(task.task_id)
 
-    def list_tasks(self) -> list[AuditTask]:
+    def list_tasks(self, applicant: str | None = None) -> list[AuditTask]:
+        sql = "SELECT task_id FROM audit_tasks"
+        params: list[str] = []
+        if applicant:
+            sql += " WHERE applicant = ?"
+            params.append(applicant)
+        sql += " ORDER BY created_at DESC"
         with self._lock, self._connection() as conn:
-            rows = conn.execute("SELECT task_id FROM audit_tasks ORDER BY created_at DESC").fetchall()
+            rows = conn.execute(sql, params).fetchall()
         return [self.require_task(row["task_id"]) for row in rows]
 
     def get_task(self, task_id: str) -> AuditTask | None:
@@ -273,6 +339,10 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
             status=row["status"],
             created_at=_load_dt(row["created_at"]),
             updated_at=_load_dt(row["updated_at"]),
+            applicant=row["applicant"] or "",
+            department=row["department"] or "",
+            expense_type=row["expense_type"] or "",
+            note=row["note"] or "",
             files=[StoredFile(file_name=item["file_name"], content=item["content"]) for item in file_rows],
             report=AuditReport.model_validate_json(row["report_json"]) if row["report_json"] else None,
             error=row["error"],
@@ -443,6 +513,11 @@ class SQLiteAuditTaskStore(InMemoryAuditTaskStore):
             "INSERT INTO audit_events(event_id, task_id, event_type, message, created_at) VALUES (?, ?, ?, ?, ?)",
             (f"event-{uuid4().hex[:12]}", task_id, event_type, message, _dump_dt(_now())),
         )
+
+    def log_event(self, task_id: str, event_type: str, message: str) -> None:
+        """写入审计事件(§15:上传/查看/修改/导出/越权拒绝都要留痕)。"""
+        with self._lock, self._connection() as conn:
+            self._insert_event(conn, task_id, event_type, message)
 
 
 def _now() -> datetime:

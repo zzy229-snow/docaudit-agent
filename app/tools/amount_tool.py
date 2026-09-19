@@ -22,8 +22,12 @@ def compare_amounts(invoice: str | None, payment: str | None) -> CheckResult:
 
 
 def compare_hotel_limit(invoice: str | None, evidence: list) -> CheckResult:
+    if not evidence:
+        # PRD §16/AC-05:没有匹配制度时返回"规则缺失,待人工确认",不得判定合规
+        return CheckResult(name="rule_missing", passed=None,
+                           detail="未检索到适用的住宿标准条款，缺少规则依据，需人工确认")
     a = amount(invoice)
-    if a is None or not evidence:
+    if a is None:
         return CheckResult(name="hotel_limit", passed=None, detail="缺少住宿金额或适用制度")
     match = re.search(r"(\d+(?:\.\d+)?)元/晚", evidence[0].content)
     if not match:

@@ -14,7 +14,7 @@ from pathlib import Path
 
 from app.config import load_environment
 from app.models.audit import PolicyEvidence
-from .chunker import chunk_policy_documents
+from .chunker import PolicyChunk, chunk_policy_documents
 
 load_environment()
 
@@ -36,6 +36,26 @@ def _load_all_policy() -> list[PolicyEvidence]:
                            content=c.content, score=0.0) for c in chunks]
 
 
+def published_chunks(department: str | None = None, expense_type: str | None = None,
+                     as_of: str | None = None) -> list[PolicyChunk]:
+    """已发布制度的切片(FR-302/FR-304);制度存储不可用时返回空列表,不影响主流程。"""
+    try:
+        from app.services.policy_store import load_published_chunks
+
+        return load_published_chunks(department=department, expense_type=expense_type, as_of=as_of)
+    except Exception as exc:  # noqa: BLE001 — 制度库异常不得中断审核
+        print(f"[rag] 读取已发布制度失败:{exc!r}")
+        return []
+
+
+def _published_evidence(department: str | None = None, expense_type: str | None = None,
+                        as_of: str | None = None) -> list[PolicyEvidence]:
+    return [
+        PolicyEvidence(chunk_id=c.chunk_id, section=c.section_path, content=c.content, score=0.0)
+        for c in published_chunks(department=department, expense_type=expense_type, as_of=as_of)
+    ]
+
+
 def _resolve_expense_type(files=None) -> str:
     """从上传文件名推断费用类型(任务⑥:元数据过滤的 expense_type)。
 
@@ -52,12 +72,13 @@ def _resolve_expense_type(files=None) -> str:
 
 def retrieve_policy(city: str | None, query: str | None = None,
                     expense_type: str | None = None, department: str | None = None,
-                    files=None) -> list[PolicyEvidence]:
-    """按城市(或自由文本 query)检索制度,支持元数据过滤(任务⑥)。
+                    files=None, as_of: str | None = None) -> list[PolicyEvidence]:
+    """按城市(或自由文本 query)检索制度,支持元数据过滤(任务⑥/FR-304)。
 
     - expense_type: 费用类型(TRAVEL/EXPENSE/MEDICAL/PURCHASE);
     - department : 适用部门(如 研发部);
-    - files      : 上传文件名列表,用于自动推断 expense_type(未显式指定时)。
+    - files      : 上传文件名列表,用于自动推断 expense_type(未显式指定时);
+    - as_of      : 任务日期,用于制度版本生效区间过滤(FR-303/304)。
 
     未指定费用类型时默认 TRAVEL(当前唯一接入的审核场景是差旅报销),
     以保证差旅 Recall@1 契约不被扩充制度干扰。返回契约 PolicyEvidence 不变。
@@ -69,24 +90,25 @@ def retrieve_policy(city: str | None, query: str | None = None,
 
     if RAG_MODE == "local":
         try:
-            evidence = _retrieve_local(query or _query_from_city(city))
+            extra = published_chunks(department=department, expense_type=expense_type, as_of=as_of)
+            evidence = _retrieve_local(query or _query_from_city(city), extra_chunks=extra)
             return _rerank_by_city(evidence, city)
         except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
             print(f"[rag] local 检索失败,降级 mock: {exc!r}")
-            return _retrieve_mock(city, expense_type, department)
+            return _retrieve_mock(city, expense_type, department, as_of)
     if RAG_MODE == "milvus":
         try:
             return _retrieve_milvus(query or city or "", expense_type, department)
         except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
             print(f"[rag] milvus 检索失败,降级 mock: {exc!r}")
-            return _retrieve_mock(city, expense_type, department)
-    return _retrieve_mock(city, expense_type, department)
+            return _retrieve_mock(city, expense_type, department, as_of)
+    return _retrieve_mock(city, expense_type, department, as_of)
 
 
-def _retrieve_local(query: str) -> list[PolicyEvidence]:
+def _retrieve_local(query: str, extra_chunks: list[PolicyChunk] | None = None) -> list[PolicyEvidence]:
     from .local_store import retrieve_local
 
-    return retrieve_local(query, limit=2)
+    return retrieve_local(query, limit=2, extra_chunks=extra_chunks)
 
 
 def _query_from_city(city: str | None) -> str:
@@ -117,49 +139,57 @@ def _rerank_by_city(evidence: list[PolicyEvidence], city: str | None) -> list[Po
 
 
 def _retrieve_mock(city: str | None, expense_type: str | None = None,
-                   department: str | None = None) -> list[PolicyEvidence]:
-    """规则匹配基线(任务⑥):城市匹配 + 费用类型过滤。
+                   department: str | None = None, as_of: str | None = None) -> list[PolicyEvidence]:
+    """规则匹配基线(任务⑥):城市匹配 + 费用类型过滤 + 已发布制度参与。
 
     兼容协作者基线:仅按城市查询(expense_type=TRAVEL/None)时,保持原 travel 语义
-    (一线命中 A、其他命中 B),不让扩充制度改变默认结果;
-    显式传其他费用类型时,全量加载并按费用类型过滤(医药/采购制度命中)。
+    (一线命中 A、其他命中 B);已发布制度仅在条款显式包含该城市时以更高权重参与
+    (score 1.05),不覆盖基线的"其他城市"兜底条款,避免改变既有评测结论。
     """
     if expense_type and expense_type != "TRAVEL":
-        return _retrieve_mock_by_expense(city, expense_type)
+        return _retrieve_mock_by_expense(city, expense_type, department, as_of)
 
-    # 原协作者逻辑(仅 travel 制度按城市匹配)
     city = city.removesuffix("市") if city else None
     if not city:
         return []
-    matches = []
-    for item in _load_all_policy():
+    matches: list[tuple[float, int, PolicyEvidence]] = []
+    for order, item in enumerate(_load_all_policy()):
         if city in item.content and item.chunk_id.startswith("TRAVEL"):
-            matches.append(item.model_copy(update={"score": 1.0}))
+            matches.append((1.0, order, item))
         elif ("其他城市" in item.content
               and city not in _FIRST_TIER and item.chunk_id.startswith("TRAVEL")):
-            matches.append(item.model_copy(update={"score": 0.8}))
-    return matches[:2]
+            matches.append((0.8, order, item))
+    base_count = len(matches)
+    for order, item in enumerate(_published_evidence(department=department, expense_type="TRAVEL", as_of=as_of)):
+        if city in item.content:
+            matches.append((1.05, base_count + order, item))
+    matches.sort(key=lambda entry: (-entry[0], entry[1]))
+    return [item.model_copy(update={"score": score}) for score, _order, item in matches[:2]]
 
 
-def _retrieve_mock_by_expense(city: str | None, expense_type: str) -> list[PolicyEvidence]:
-    """按费用类型过滤检索(任务⑥:元数据过滤的 mock 侧近似)。
-
-    遍历全量制度(含扩充),按 content 关键词近似匹配费用类型;
-    若同时给了 city,优先返回同时含城市的条款。
-    """
-    matches = []
-    for item in _load_all_policy():
+def _retrieve_mock_by_expense(city: str | None, expense_type: str,
+                              department: str | None = None,
+                              as_of: str | None = None) -> list[PolicyEvidence]:
+    """按费用类型过滤检索(任务⑥:元数据过滤的 mock 侧近似)。"""
+    matches: list[tuple[float, int, PolicyEvidence]] = []
+    for order, item in enumerate(_load_all_policy()):
         if not _content_matches_expense(item.content, expense_type):
             continue
         if city:
             c = city.removesuffix("市") if city else ""
             if c and c in item.content:
-                matches.append(item.model_copy(update={"score": 1.0}))
+                matches.append((1.0, order, item))
             elif "其他城市" in item.content and c not in _FIRST_TIER:
-                matches.append(item.model_copy(update={"score": 0.8}))
+                matches.append((0.8, order, item))
         else:
-            matches.append(item.model_copy(update={"score": 0.8}))
-    return matches[:2]
+            matches.append((0.8, order, item))
+    base_count = len(matches)
+    # 已发布制度已按 expense_type/department/生效区间过滤,直接参与排序
+    for order, item in enumerate(_published_evidence(department=department, expense_type=expense_type, as_of=as_of)):
+        score = 1.05 if (city and city.removesuffix("市") in item.content) else 0.9
+        matches.append((score, base_count + order, item))
+    matches.sort(key=lambda entry: (-entry[0], entry[1]))
+    return [item.model_copy(update={"score": score}) for score, _order, item in matches[:2]]
 
 
 def _content_matches_expense(content: str, expense_type: str) -> bool:

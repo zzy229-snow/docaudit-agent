@@ -2,6 +2,7 @@ import unittest
 from pathlib import Path
 from decimal import Decimal
 from app.agent.graph import run_audit
+from app.services.invoice_registry import isolate_registry
 from app.tools.amount_tool import compare_amounts
 from app.tools.date_tool import compare_date_range
 
@@ -10,6 +11,10 @@ BASE = Path(__file__).resolve().parents[1] / "data" / "demo"
 
 
 class AuditTests(unittest.TestCase):
+    def setUp(self):
+        # 发票查重登记表隔离,避免用例之间互相污染(FR-204)
+        isolate_registry()
+
     def load(self, case):
         files = [(p.name, p.read_bytes()) for p in sorted((BASE / case).iterdir()) if p.is_file()]
         return run_audit(files)

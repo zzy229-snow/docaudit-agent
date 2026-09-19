@@ -3,12 +3,17 @@ from pathlib import Path
 
 from app.agent.graph import run_audit
 from app.services.audit_summary import build_audit_summary
+from app.services.invoice_registry import isolate_registry
 
 
 BASE = Path(__file__).resolve().parents[1] / "data" / "demo"
 
 
 class AuditSummaryTests(unittest.TestCase):
+    def setUp(self):
+        # 发票查重登记表隔离,避免用例之间互相污染(FR-204)
+        isolate_registry()
+
     def load_report(self, case: str):
         files = [(path.name, path.read_bytes()) for path in sorted((BASE / case).iterdir()) if path.is_file()]
         return run_audit(files)
