@@ -19,7 +19,7 @@ streamlit run streamlit_app.py
 
 打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元、发票购买方与申请人不一致和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
 
-Streamlit 页面已升级为审核工作台形态：左侧可创建 5 组虚构样例任务，主界面包含任务中心、新建审核、审核详情、风险看板、字段证据、人工复核、事件时间线和 JSON 审核包下载。
+Streamlit 页面已升级为审核工作台形态：左侧可创建 5 组虚构样例任务，主界面包含任务中心、新建审核、审核详情、风险看板、字段证据、人工复核、事件时间线、HTML 正式报告和 JSON 审核包下载。
 
 ## FastAPI接口
 
@@ -36,6 +36,7 @@ python -m uvicorn app.api.main:app --reload --port 8102
 - Streamlit 演示页：内置 5 组虚构样例，支持 JSON 报告下载。
 - FastAPI 任务接口：创建任务、上传材料、运行审核、字段修正、人工复核决策。
 - 生产化任务基础：SQLite 持久化任务、材料、报告、人工修正、复核项和审计事件。
+- 报告导出：支持通过 API 和 Streamlit 下载 HTML 正式审核报告。
 - LLM 接入护栏：JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。
 - 评测基线：5 条端到端样例，可输出 JSON/Markdown 报告。
 
@@ -61,6 +62,10 @@ python -m app.services.model_smoke
 
 配置方式见 `docs/OCR_INTEGRATION.md`。
 
+## 真实 RAG
+
+默认 `RAG_MODE=mock` 适合离线测试。生产化演示建议切换到 `RAG_MODE=local`，系统会从 `data/policies` 的制度切片中进行本地真实检索；如果已经准备好 bge-m3 和 Milvus Lite，也可以使用 `RAG_MODE=milvus`。配置和评测方式见 `docs/RAG_INTEGRATION.md`。
+
 ## 测试
 
 ```bash
@@ -83,7 +88,7 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 ## 当前限制
 
-此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；多模态模型、生产级向量检索、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
+此版是可解释的演示基线。默认 OCR、RAG、LLM 均可在 mock/offline 模式下运行；任务和审核结果已支持本地 SQLite 持久化。OCR 已提供 Tesseract、HTTP OCR、MinerU 三类真实接入口；RAG 已提供本地真实检索和 Milvus 混合检索接入口；多模态模型、LangGraph 持久化运行时、权限体系和外部数据库部署仍属于后续开发。住宿规则以**一晚**为例，真实审核还需要入住晚数、例外审批和制度生效日期。
 
 ## 演示与发布
 

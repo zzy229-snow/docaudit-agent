@@ -1,23 +1,28 @@
 """制度检索器(PRD §9.3)。RAG_MODE 控制后端:
 
 - mock   (默认):规则匹配基线,零依赖,保持协作者原有行为;
-- milvus:向量混合检索(需已运行 build_index.py 建立索引;编码依赖见 requirements-rag.txt)。
+- local  :本地制度切片关键词检索,零外部服务,用于生产化演示前的真实检索基线;
+- milvus :向量混合检索(需已运行 build_index.py 建立索引;编码依赖见 requirements-rag.txt)。
 
+任务⑥增强:制度扩充(多费用类型)、表格行切片、元数据过滤(expense_type/department)。
 任何后端失败都降级回 mock(PRD §23.5「检索失败降级」),输出契约 PolicyEvidence 不变。
 """
 from __future__ import annotations
 
 import os
-
-from app.config import load_environment
 from pathlib import Path
 
+from app.config import load_environment
 from app.models.audit import PolicyEvidence
 from .chunker import chunk_policy_documents
 
 load_environment()
 
 POLICY_DIR = Path(__file__).resolve().parents[2] / "data" / "policies"
+
+RAG_MODE = os.environ.get("RAG_MODE", "mock").strip().lower()
+
+_FIRST_TIER = {"北京", "上海", "广州", "深圳"}
 
 
 def _load_all_policy() -> list[PolicyEvidence]:
@@ -29,8 +34,6 @@ def _load_all_policy() -> list[PolicyEvidence]:
     chunks = chunk_policy_documents(POLICY_DIR)
     return [PolicyEvidence(chunk_id=c.chunk_id, section=c.section_path,
                            content=c.content, score=0.0) for c in chunks]
-
-RAG_MODE = os.environ.get("RAG_MODE", "mock").strip().lower()
 
 
 def _resolve_expense_type(files=None) -> str:
@@ -52,18 +55,24 @@ def retrieve_policy(city: str | None, query: str | None = None,
                     files=None) -> list[PolicyEvidence]:
     """按城市(或自由文本 query)检索制度,支持元数据过滤(任务⑥)。
 
-    - expense_type: 费用类型(TRAVEL/EXPENSE/MEDICAL/PURCHASE),None=不过滤;
-    - department: 适用部门(如 研发部),None=不过滤;
-    - files: 上传文件名列表,用于自动推断 expense_type(若未显式指定)。
+    - expense_type: 费用类型(TRAVEL/EXPENSE/MEDICAL/PURCHASE);
+    - department : 适用部门(如 研发部);
+    - files      : 上传文件名列表,用于自动推断 expense_type(未显式指定时)。
 
-    返回 PolicyEvidence 列表,契约不变。
+    未指定费用类型时默认 TRAVEL(当前唯一接入的审核场景是差旅报销),
+    以保证差旅 Recall@1 契约不被扩充制度干扰。返回契约 PolicyEvidence 不变。
     """
     if files and not expense_type:
         expense_type = _resolve_expense_type(files)
-    # 未指定费用类型时默认差旅(当前唯一接入的审核场景是差旅报销);
-    # 显式 expension 类型(医药/采购)会覆盖此默认。
     if not expense_type:
         expense_type = "TRAVEL"
+
+    if RAG_MODE == "local":
+        try:
+            return _retrieve_local(query or _query_from_city(city))
+        except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
+            print(f"[rag] local 检索失败,降级 mock: {exc!r}")
+            return _retrieve_mock(city, expense_type, department)
     if RAG_MODE == "milvus":
         try:
             return _retrieve_milvus(query or city or "", expense_type, department)
@@ -73,16 +82,25 @@ def retrieve_policy(city: str | None, query: str | None = None,
     return _retrieve_mock(city, expense_type, department)
 
 
-_FIRST_TIER = {"北京", "上海", "广州", "深圳"}
+def _retrieve_local(query: str) -> list[PolicyEvidence]:
+    from .local_store import retrieve_local
+
+    return retrieve_local(query, limit=2)
+
+
+def _query_from_city(city: str | None) -> str:
+    if not city:
+        return ""
+    return f"{city} 住宿标准 差旅 报销 酒店"
 
 
 def _retrieve_mock(city: str | None, expense_type: str | None = None,
                    department: str | None = None) -> list[PolicyEvidence]:
     """规则匹配基线(任务⑥):城市匹配 + 费用类型过滤。
 
-    兼容协作者基线:仅按城市查询(expense_type=None)时,保持原 travel 语义
+    兼容协作者基线:仅按城市查询(expense_type=TRAVEL/None)时,保持原 travel 语义
     (一线命中 A、其他命中 B),不让扩充制度改变默认结果;
-    显式传 expense_type 时,全量加载并按费用类型过滤(医药/采购制度命中)。
+    显式传其他费用类型时,全量加载并按费用类型过滤(医药/采购制度命中)。
     """
     if expense_type and expense_type != "TRAVEL":
         return _retrieve_mock_by_expense(city, expense_type)

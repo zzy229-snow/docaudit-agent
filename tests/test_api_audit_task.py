@@ -69,6 +69,12 @@ class AuditTaskApiTests(unittest.TestCase):
         self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in payload["risks"]))
         self.assertTrue(any(item["chunk_id"] == "TRAVEL-V1-4.2-A" for item in payload["policy_evidence"]))
 
+        html_report = self.client.get(f"/api/v1/audit-tasks/{task_id}/report.html")
+        self.assertEqual(html_report.status_code, 200)
+        self.assertIn("text/html", html_report.headers["content-type"])
+        self.assertIn("企业报销审核报告", html_report.text)
+        self.assertIn("HOTEL_LIMIT", html_report.text)
+
         review_items = self.client.get(f"/api/v1/audit-tasks/{task_id}/review-items")
         self.assertEqual(review_items.status_code, 200)
         self.assertTrue(any(item["risk_type"] == "HOTEL_LIMIT" for item in review_items.json()["review_items"]))
