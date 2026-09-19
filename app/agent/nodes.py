@@ -5,6 +5,7 @@ from app.models.state import HumanReviewItem, finish_node, record_tool_call, sta
 from app.parsers.loader import parse_document
 from app.extraction.field_extractor import extract_fields_with_diagnostics
 from app.rag.retriever import retrieve_policy
+from app.services.injection_guard import detect_injection
 from app.tools.registry import get_tool
 
 
@@ -24,8 +25,22 @@ def parse_documents(state: dict) -> dict:
     if hard_regions:
         state.setdefault("trace", []).append(
             f"困难区域检测：{len(hard_regions)}份材料识别质量不足，需人工核对")
+    # PRD §15:文档内容视为不可信数据,命中注入话术只记录不改写结论
+    injection_hits = []
+    for doc in documents:
+        snippets = detect_injection(doc.text)
+        if snippets:
+            injection_hits.append({"file_name": doc.file_name, "snippets": snippets})
+    if injection_hits:
+        state.setdefault("trace", []).append(
+            f"指令注入检测：{len(injection_hits)}份材料含疑似注入文本，已按不可信数据处理")
     finish_node(state, "parse_documents", started_at, f"解析{len(documents)}份材料")
-    return {"documents": documents, "hard_regions": hard_regions, "trace": state["trace"]}
+    return {
+        "documents": documents,
+        "hard_regions": hard_regions,
+        "injection_hits": injection_hits,
+        "trace": state["trace"],
+    }
 
 
 def extract(state: dict) -> dict:
@@ -165,7 +180,18 @@ def check(state: dict) -> dict:
         risks.append(risk)
         if requires_review(risk.level):
             human_review_items.append(_review_item_for(risk))
-    finish_node(state, "check", started_at, f"执行5项确定性检查,风险{len(risks)}项")
+    # PRD §15:材料中的指令注入文本(HIGH),不改写任何确定性检查结论
+    for hit in state.get("injection_hits") or []:
+        snippets = "、".join(hit["snippets"])
+        risk = build_risk(
+            risk_type="PROMPT_INJECTION",
+            reason=f"{hit['file_name']} 含疑似指令注入文本（{snippets}），已按不可信数据处理，需人工确认",
+            evidence_refs=[hit["file_name"]],
+        )
+        risks.append(risk)
+        if requires_review(risk.level):
+            human_review_items.append(_review_item_for(risk))
+    finish_node(state, "check", started_at, f"执行6项确定性检查,风险{len(risks)}项")
     return {"checks": results, "risks": risks, "human_review_items": human_review_items, "trace": state["trace"]}
 
 

@@ -33,14 +33,17 @@ python -m uvicorn app.api.main:app --reload --port 8102
 
 - 六项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性、重复发票查重。
 - 风险四级分级：HIGH/MEDIUM/LOW/INFO，HIGH 必须人工复核、LOW/INFO 仅提示（PRD 附录A）。
+- 制度无依据不判合规：检索不到适用条款时输出“缺少规则依据，需人工确认”（PRD §16 / AC-05）。
+- 指令注入防护：材料正文命中“忽略规则/直接判合规/跳过检查”等话术时记录 `PROMPT_INJECTION`（HIGH），但不改写任何确定性结论（PRD §15）。
 - 重复发票查重：按发票号码+开票日期+金额查询本地登记表，命中返回关联任务编号；登记表路径由 `INVOICE_REGISTRY_PATH` 控制（默认 `data/runtime/invoice_registry.sqlite3`）。
+- 文本材料质量检测：TXT/DOCX/XLSX 正文含签字/手写/盖章关键词或乱码率过高时标记困难材料并转人工（PRD §6.4）。
 - 可解释报告：风险原因、字段证据、制度依据、检查项状态、Agent trace。
 - Streamlit 演示页：内置 5 组虚构样例，支持 JSON 报告下载。
 - FastAPI 任务接口：创建任务、上传材料、运行审核、字段修正、人工复核决策。
 - 生产化任务基础：SQLite 持久化任务、材料、报告、人工修正、复核项和审计事件。
 - 报告导出：支持通过 API 和 Streamlit 下载 HTML 正式审核报告。
 - LLM 接入护栏：JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。
-- 评测基线：53 条端到端样例，可输出 JSON/Markdown 报告。
+- 评测基线：57 条端到端样例（含重复发票/制度无依据/指令注入/OCR困难/手写关键词），输出 JSON/Markdown 报告，并统计风险 P/R/F1、工具成功率、人工复核率与 P50/P95 耗时。
 
 ## 模型API
 

@@ -38,22 +38,28 @@ def parse_document(file_name: str, content: bytes, ocr_engine: OcrEngine | None 
         pages = [Page(number=1, text=text)]
         doc_type = "image_ocr" + doc_type_suffix(assessment)
     elif suffix == ".txt":
-        pages = [Page(number=1, text=content.decode("utf-8-sig"))]
-        doc_type = "text"
+        text = content.decode("utf-8-sig")
+        assessment = assess(text=text)      # 文本材料同样检测手写/盖章关键词与乱码(§6.4)
+        pages = [Page(number=1, text=text)]
+        doc_type = "text" + doc_type_suffix(assessment)
     elif suffix == ".docx":
         word = WordDocument(BytesIO(content))
         text = [p.text for p in word.paragraphs]
         text += [" | ".join(c.text for c in row.cells) for t in word.tables for row in t.rows]
-        pages = [Page(number=1, text="\n".join(text))]
-        doc_type = "docx"
+        joined = "\n".join(text)
+        assessment = assess(text=joined)
+        pages = [Page(number=1, text=joined)]
+        doc_type = "docx" + doc_type_suffix(assessment)
     elif suffix == ".xlsx":
         book = load_workbook(BytesIO(content), read_only=True, data_only=True)
         text = [f"[{sheet.title}] " + " | ".join(
             " ".join(str(v) for v in row if v is not None)
             for row in sheet.iter_rows(values_only=True)) for sheet in book.worksheets]
         book.close()
-        pages = [Page(number=1, text="\n".join(text))]
-        doc_type = "xlsx"
+        joined = "\n".join(text)
+        assessment = assess(text=joined)
+        pages = [Page(number=1, text=joined)]
+        doc_type = "xlsx" + doc_type_suffix(assessment)
     else:
         raise ValueError("仅支持PDF、TXT、DOCX、XLSX及图片文件")
     return Document(document_id=sha256(content).hexdigest()[:16], file_name=Path(file_name).name,
