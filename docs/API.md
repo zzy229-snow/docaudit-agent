@@ -36,6 +36,7 @@ http://127.0.0.1:8102/docs
 | `GET` | `/api/v1/audit-tasks/{task_id}/risks` | 获取风险列表 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/trace` | 获取执行轨迹 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/summary` | 获取面向页面展示的可解释摘要 |
+| `GET` | `/api/v1/audit-tasks/{task_id}/report.html` | 下载 HTML 正式审核报告 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/review-items` | 获取人工复核项 |
 | `GET` | `/api/v1/audit-tasks/{task_id}/events` | 获取任务生命周期事件 |
 | `PATCH` | `/api/v1/audit-tasks/{task_id}/fields/{field_name}` | 提交字段人工修正 |
@@ -132,7 +133,7 @@ API 测试会覆盖：
 - 当前 SQLite 是本地单机持久化，不适合作为多实例部署的共享数据库。
 - 尚未实现用户、角色和权限控制。
 - 字段修正后的第一版实现采用全量重跑，尚未做依赖图局部重跑。
-- 尚未实现报告导出。
+- 当前报告导出为 HTML，尚未提供 PDF 原生生成。
 - 尚未实现幂等请求 ID、文件去重和任务恢复锁。
 
 这些限制是当前生产化改造的下一批边界，不应在对外说明中夸大。
@@ -144,4 +145,4 @@ API 测试会覆盖：
 1. 将字段修正后的全量重跑升级为按依赖节点局部重跑。
 2. 将 SQLite 存储替换为 PostgreSQL，并增加 Alembic 迁移。
 3. 将 `trace` 拆成结构化节点轨迹与工具调用轨迹。
-4. 增加报告导出接口：`POST /api/v1/audit-tasks/{id}/report`。
+4. 将 HTML 报告进一步扩展为 PDF 报告、电子签章和归档流水号。
