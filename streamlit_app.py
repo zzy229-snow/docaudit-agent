@@ -33,6 +33,54 @@ NAV_OPTIONS = [NAV_TASKS, NAV_CREATE, NAV_DETAIL]
 st.set_page_config(page_title="DocAudit Agent 审核工作台", layout="wide")
 
 
+def _inject_nav_style() -> None:
+    """把视图导航的 radio 化妆成标签页样式(选中项下方横线),兼顾可编程跳转。"""
+    primary = st.get_option("theme.primaryColor") or "#FF4B4B"
+    st.markdown(
+        f"""
+<style>
+  /* 视图导航:还原标签页外观(选中项下方横线) */
+  div[role="radiogroup"] {{
+      border-bottom: 1px solid rgba(128, 128, 128, 0.25);
+      gap: 0;
+      margin-bottom: 0.75rem;
+  }}
+  div[role="radiogroup"] label {{
+      padding: 0.5rem 0.15rem 0.55rem 0.15rem;
+      margin: 0 1.1rem -1px 0;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      background: transparent;
+      transition: border-color 0.18s ease, color 0.18s ease;
+  }}
+  div[role="radiogroup"] label:hover {{
+      color: {primary};
+  }}
+  div[role="radiogroup"] label:has(input:checked),
+  div[role="radiogroup"] label[aria-checked="true"] {{
+      border-bottom-color: {primary};
+      color: {primary};
+  }}
+  div[role="radiogroup"] label:has(input:checked) p,
+  div[role="radiogroup"] label[aria-checked="true"] p {{
+      font-weight: 600;
+  }}
+  /* 隐藏圆点指示器,只留下划线 */
+  div[role="radiogroup"] label > div:first-child {{
+      display: none;
+  }}
+  div[role="radiogroup"] label input + div {{
+      display: none;
+  }}
+</style>
+""",
+        unsafe_allow_html=True,
+    )
+
+
+_inject_nav_style()
+
+
 def load_demo_files(case: str) -> list[tuple[str, bytes]]:
     case_dir = DEMO_ROOT / case
     return [(path.name, path.read_bytes()) for path in sorted(case_dir.iterdir()) if path.is_file()]
