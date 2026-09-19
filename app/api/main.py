@@ -1,9 +1,10 @@
-from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 from app.agent.graph import run_audit
+from app.api.auth import ROLE_APPLICANT, install_auth
 from app.api.evaluations import router as evaluations_router
 from app.api.policies import router as policies_router
 from app.api.store import AuditEvent, AuditTask, FieldCorrection, ReviewItem, ReviewStatus, task_store
@@ -17,6 +18,7 @@ load_dotenv()
 app = FastAPI(title="DocAudit Agent API", version="0.1.0")
 app.include_router(policies_router)
 app.include_router(evaluations_router)
+install_auth(app)
 
 
 class TaskSummary(BaseModel):
@@ -27,6 +29,21 @@ class TaskSummary(BaseModel):
     updated_at: str
     error: str | None = None
     result_status: str | None = None
+    #: FR-001 任务元数据
+    applicant: str = ""
+    department: str = ""
+    expense_type: str = ""
+
+
+class CreateTaskRequest(BaseModel):
+    applicant: str = ""
+    department: str = ""
+    expense_type: str = ""
+    note: str = ""
+
+
+def _current_user(request: Request):
+    return getattr(request.state, "user", None)
 
 
 class TaskListResponse(BaseModel):
@@ -97,13 +114,34 @@ def health() -> dict[str, str]:
 
 
 @app.post("/api/v1/audit-tasks", response_model=TaskSummary, status_code=status.HTTP_201_CREATED)
-def create_audit_task() -> TaskSummary:
-    return _task_summary(task_store.create_task())
+def create_audit_task(request: Request, payload: CreateTaskRequest | None = None) -> TaskSummary:
+    """创建审核任务(FR-001)。
+
+    请求体可省略(兼容旧调用);如实传申请人/部门/报销类型则写入任务元数据,
+    并在 ``AUTH_MODE=enforce`` 下校验申请人只能是本人。
+    """
+    payload = payload or CreateTaskRequest()
+    user = _current_user(request)
+    if user is not None and user.role == ROLE_APPLICANT:
+        if not payload.applicant:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="缺少申请人(applicant)")
+        if payload.applicant != user.user_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="申请人只能是本人")
+    task = task_store.create_task(
+        applicant=payload.applicant,
+        department=payload.department,
+        expense_type=payload.expense_type,
+        note=payload.note,
+    )
+    return _task_summary(task)
 
 
 @app.get("/api/v1/audit-tasks", response_model=TaskListResponse)
-def list_audit_tasks() -> TaskListResponse:
-    return TaskListResponse(tasks=[_task_summary(task) for task in task_store.list_tasks()])
+def list_audit_tasks(request: Request) -> TaskListResponse:
+    """任务列表:申请人角色只返回本人任务(§2 权限边界)。"""
+    user = _current_user(request)
+    applicant = user.user_id if (user is not None and user.role == ROLE_APPLICANT) else None
+    return TaskListResponse(tasks=[_task_summary(task) for task in task_store.list_tasks(applicant=applicant)])
 
 
 @app.post("/api/v1/audit-tasks/{task_id}/documents", response_model=UploadResponse)
@@ -126,6 +164,8 @@ def run_audit_task(task_id: str) -> RunResponse:
             [(item.file_name, item.content) for item in task.files],
             field_overrides=task_store.field_overrides(task.task_id),
             task_id=task.task_id,
+            department=task.department or None,
+            as_of=task.created_at.date().isoformat(),
         )
     except (ValueError, RuntimeError) as exc:
         failed = task_store.save_error(task.task_id, str(exc))
@@ -223,4 +263,7 @@ def _task_summary(task: AuditTask) -> TaskSummary:
         updated_at=task.updated_at.isoformat(),
         error=task.error,
         result_status=result_status,
+        applicant=task.applicant,
+        department=task.department,
+        expense_type=task.expense_type,
     )

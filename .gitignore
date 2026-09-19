@@ -8,6 +8,7 @@ __pycache__/
 data/private/
 data/uploads/
 reports/
+logs/
 *.db
 *.sqlite3
 data/runtime/

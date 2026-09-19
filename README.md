@@ -17,6 +17,10 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
+一键启动（含依赖安装与就绪检查）：`bash scripts/start.sh`（Windows：`scripts\start.bat`），
+停止：`bash scripts/stop.sh`。Docker Compose 单机部署：`docker compose up -d --build`
+（API 8000 / 工作台 8500），详见 `docs/DEPLOYMENT.md`。
+
 打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元、发票购买方与申请人不一致和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
 
 Streamlit 页面已升级为审核工作台形态：左侧可创建 5 组虚构样例任务，主界面包含任务中心、新建审核、审核详情、风险看板、字段证据、人工复核、事件时间线、HTML 正式报告和 JSON 审核包下载。
@@ -43,6 +47,8 @@ python -m uvicorn app.api.main:app --reload --port 8102
 - 生产化任务基础：SQLite 持久化任务、材料、报告、人工修正、复核项和审计事件。
 - 报告导出：支持通过 API 和 Streamlit 下载 HTML 正式审核报告。
 - 制度管理接口：上传制度（TXT/DOCX/PDF）→ 自动切片入库 → 发布/停用/版本切换，检索按部门与生效区间过滤（FR-301~FR-304）。
+- 最小可用 RBAC：`AUTH_MODE=enforce` 后按角色（申请人/审核员/制度管理员/管理员/开发测试）与任务归属鉴权，越权 404 不泄露存在性并写审计事件（§2/§15/AC-09）。
+- 部署交付：Docker Compose 单机部署 + 一键启动脚本（`scripts/start.sh`、`scripts/start.bat`）。
 - 离线评测接口：`POST /api/v1/evaluations/run` 直接返回回归指标与逐例结果（可输出 Markdown）。
 - LLM 接入护栏：JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。
 - 评测基线：57 条端到端样例（含重复发票/制度无依据/指令注入/OCR困难/手写关键词），输出 JSON/Markdown 报告，并统计风险 P/R/F1、工具成功率、人工复核率与 P50/P95 耗时。
