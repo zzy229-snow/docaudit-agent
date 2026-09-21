@@ -41,16 +41,19 @@ def _isolated_eval_state(isolate: bool) -> Iterator[None]:
 
 @contextmanager
 def _synthetic_corpus_scope() -> Iterator[None]:
-    """评测语料是合成文本:未显式配置真实 OCR 时用 ``OCR_ENGINE=stub`` 跑。
+    """评测语料是合成文本:评测期间一律使用 ``OCR_ENGINE=stub``。
 
     stub 引擎产出与 mock 相同的合成文本,但按"已识别"对待 —— 否则材料可读性判定
     (``app.services.readability``)会把所有含图片材料的用例判成"无法判定",评测基线
-    就不再反映主流程行为。仅在本次调用内临时生效,退出即还原,不影响服务进程后续
-    真实请求;若调用方已显式配置了真实引擎(tesseract/http/mineru/auto)则不覆盖。
+    就不再反映主流程行为。
+
+    这里**默认强制** stub(而不是"用户配了真引擎就用真引擎"):评测是离线回归基线,
+    若沿用自己的真实 OCR(如 baidu),会联网、花额度、且结论不可复现。确实想用真引擎
+    跑评测时显式设 ``EVAL_OCR_ENGINE=baidu``(或 auto/tesseract)即可。仅在本次调用内
+    临时生效,退出即还原。
     """
     previous = os.environ.get("OCR_ENGINE")
-    if previous is None or previous.strip().lower() in {"", "mock", "none", "off"}:
-        os.environ["OCR_ENGINE"] = "stub"
+    os.environ["OCR_ENGINE"] = os.environ.get("EVAL_OCR_ENGINE", "stub")
     try:
         yield
     finally:

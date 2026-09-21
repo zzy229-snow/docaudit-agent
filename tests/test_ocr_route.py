@@ -2,6 +2,12 @@
 
 import os
 import unittest
+
+# 第三方库(pymilvus)在 import 时会调用 load_dotenv(),因为 venv 在仓库内,它会把仓库
+# `.env` 里的真实 OCR/模型配置读进来。这里在任何 app 模块之前钉住离线默认值
+# (.env 以 override=False 加载,不会覆盖已存在的值),保证测试离线、可复现。
+os.environ["OCR_ENGINE"] = "mock"
+os.environ["MODEL_PROVIDER"] = "mock"
 from io import BytesIO
 from unittest.mock import patch
 

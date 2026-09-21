@@ -16,6 +16,11 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 from PIL import Image
 
+# 第三方库(pymilvus)在 import 时会 load_dotenv() 读走仓库 .env 里的真实引擎配置;
+# 这里在任何 app 模块之前钉住离线默认值,保证"演示模式"相关断言可复现。
+os.environ["OCR_ENGINE"] = "mock"
+os.environ["MODEL_PROVIDER"] = "mock"
+
 from app.agent.graph import run_audit
 from app.api.main import app
 from app.models.document import Document, Page

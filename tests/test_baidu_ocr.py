@@ -17,6 +17,11 @@ from urllib.parse import parse_qs
 
 from PIL import Image
 
+# 第三方库(pymilvus)在 import 时会 load_dotenv() 读走仓库 .env 里的真实引擎配置
+# (venv 在仓库内);这里先钉住离线默认值,本模块内的 patch.dict 会按需覆盖。
+os.environ["OCR_ENGINE"] = "mock"
+os.environ["MODEL_PROVIDER"] = "mock"
+
 from app.agent.graph import run_audit
 from app.parsers.ocr import BaiduVatInvoiceOcrEngine, get_ocr_engine
 from app.services.invoice_registry import isolate_registry
@@ -167,7 +172,10 @@ class BaiduEngineTests(unittest.TestCase):
     def test_missing_secret_key_gives_actionable_error(self):
         with FakeBaidu([BAIDU_SAMPLE]) as fake:
             env = baidu_env(fake.base)
-            env.pop("BAIDU_OCR_SECRET_KEY")
+            # 三个可能的 Secret 来源都清空(机器上 .env 可能已经配了真 key)
+            env["BAIDU_OCR_SECRET_KEY"] = ""
+            env["OCR_HTTP_API_KEY_SECRET"] = ""
+            env["OCR_HTTP_SECRET_KEY"] = ""
             with patch.dict(os.environ, env):
                 engine = get_ocr_engine()
                 with self.assertRaisesRegex(RuntimeError, "BAIDU_OCR_SECRET_KEY"):

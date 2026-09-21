@@ -1,4 +1,10 @@
+import os
 import unittest
+
+# 第三方库(pymilvus)在 import 时会 load_dotenv() 读走仓库 .env 里的真实引擎配置;
+# 本模块会走 parse_document(图片用例),先钉住离线默认值保证可复现。
+os.environ["OCR_ENGINE"] = "mock"
+os.environ["MODEL_PROVIDER"] = "mock"
 
 from app.evaluation.llm_runner import run_llm_case, run_llm_evaluation
 from app.evaluation.runner import DEFAULT_CASES_PATH, EvaluationCase, load_cases

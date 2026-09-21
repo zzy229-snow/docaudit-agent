@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 
 import streamlit as st
-from dotenv import load_dotenv
 
 from app.agent.graph import run_audit
 from app.api.store import AuditTask, task_store
@@ -13,8 +12,6 @@ from app.services.audit_summary import AuditExplanationSummary, build_audit_summ
 from app.services.report_exporter import build_html_report
 from app.services.task_naming import build_report_title, safe_file_name
 from app.services.readability import demo_mode_notice, is_synthetic_engine
-
-load_dotenv()
 
 load_environment()
 

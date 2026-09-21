@@ -1,19 +1,20 @@
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, status
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from dotenv import load_dotenv
 
 from app.agent.graph import run_audit
 from app.api.auth import ROLE_APPLICANT, install_auth
 from app.api.evaluations import router as evaluations_router
 from app.api.policies import router as policies_router
 from app.api.store import AuditEvent, AuditTask, FieldCorrection, ReviewItem, ReviewStatus, task_store
+from app.config import load_environment
 from app.models.audit import CheckResult, RiskItem
 from app.models.field import ExtractedField
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
 from app.services.report_exporter import build_html_report
 
-load_dotenv()
+# 统一走 app.config.load_environment:测试期间不读 .env,避免真实 OCR/模型配置影响用例
+load_environment()
 
 app = FastAPI(title="DocAudit Agent API", version="0.1.0")
 app.include_router(policies_router)
