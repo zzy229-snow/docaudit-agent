@@ -80,6 +80,47 @@ class ClassifyTests(unittest.TestCase):
         self.assertIsNone(filename_type("微信图片_2026.png"))
 
 
+class AmountLabelTests(unittest.TestCase):
+    """真实发票版面上的"价税合计"写法要能抽出金额(实机踩过)。"""
+
+    def test_price_tax_total_with_words_parsed(self):
+        from app.extraction.field_extractor import extract_fields
+        from app.models.document import Document, Page
+
+        text = ("北京增值税电子普通发票\n发票代码：110022003300\n发票号码：12345678\n"
+                "开票日期：2019年02月19日\n"
+                "价税合计(大写) 玖佰元整 (小写)¥900.00\n")
+        doc = Document(document_id="d", file_name="发票.png", document_type="text",
+                       pages=[Page(number=1, text=text)])
+
+        fields = extract_fields([doc])
+
+        self.assertEqual(fields["invoice_amount"].value, "900.00")
+        self.assertEqual(fields["invoice_number"].value, "12345678")
+
+    def test_label_does_not_cross_into_next_amount(self):
+        """大写金额后面直接跟下一行数字时,不跨行乱取(宁可不给值)。"""
+        from app.extraction.field_extractor import extract_fields
+        from app.models.document import Document, Page
+
+        text = "价税合计(大写)壹拾万圆整\n合计 94339.62 税额 5660.38"
+        doc = Document(document_id="d", file_name="发票.png", document_type="text",
+                       pages=[Page(number=1, text=text)])
+
+        self.assertNotIn("invoice_amount", extract_fields([doc]))
+
+    def test_cross_line_amount_recognized_when_marked_xiaoxie(self):
+        """OCR 把小写金额排到下一行时,只要有"小写"标记就认。"""
+        from app.extraction.field_extractor import extract_fields
+        from app.models.document import Document, Page
+
+        text = "价税合计(大写)壹拾万圆整\n(小写) ￥100000.00"
+        doc = Document(document_id="d", file_name="发票.png", document_type="text",
+                       pages=[Page(number=1, text=text)])
+
+        self.assertEqual(extract_fields([doc])["invoice_amount"].value, "100000.00")
+
+
 class RequiredDocumentsTests(unittest.TestCase):
     def test_content_types_satisfy_required_documents(self):
         result = check_required_documents(names=[], material_types=["invoice", "payment", "approval"])
