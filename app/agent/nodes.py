@@ -15,11 +15,22 @@ from app.parsers.loader import parse_document
 from app.extraction.field_extractor import extract_fields_with_diagnostics
 from app.rag.retriever import retrieve_policy
 from app.services.injection_guard import detect_injection
+from app.services.material_type import MATERIAL_LABELS, classify_documents, material_check_inputs
 from app.services.readability import assess_readability, human_provided_fields
 from app.tools.registry import get_tool
 
 import os
 import time
+
+#: 字段缺失导致"无法核对"时不再沿用"不一致"的等级(金额缺失 ≠ 金额不符)
+UNVERIFIABLE_RISK_TYPES: dict[str, str] = {"amount_match": "AMOUNT_UNVERIFIABLE"}
+
+
+def _risk_type_for(result) -> str:
+    """检查项 → 风险类型:passed 为 None(缺字段无结论)时用 *_UNVERIFIABLE 类型。"""
+    if result.passed is None:
+        return UNVERIFIABLE_RISK_TYPES.get(result.name, result.name)
+    return result.name
 
 
 def _retry_backoff_seconds() -> float:
@@ -183,8 +194,15 @@ def check(state: dict) -> dict:
     started_at = start_node(state, "check", "开始执行确定性业务工具")
     fields = state["fields"]
     get = lambda key: str(fields[key].value) if key in fields else None
+    # 材料类型按票面内容判定,文件名只在内容判不出时兜底(客户文件名常是"微信图片_xxx")
+    fallback_names, content_types = material_check_inputs(state["documents"], state.get("ocr_fields"))
+    detected = classify_documents(state["documents"], state.get("ocr_fields"))
+    if detected:
+        state.setdefault("trace", []).append(
+            "material_type: " + "、".join(f"{name}→{MATERIAL_LABELS.get(kind, '不明')}"
+                                          for name, kind in detected.items()))
     tool_inputs = [
-        ("required_documents", {"document_names": [d.file_name for d in state["documents"]]}),
+        ("required_documents", {"document_names": fallback_names, "material_types": content_types}),
         ("amount_match", {"invoice_amount": get("invoice_amount"), "payment_amount": get("payment_amount")}),
         (
             "date_range",
@@ -231,7 +249,7 @@ def check(state: dict) -> dict:
     for result in results:
         if result.passed is not True:
             risk = build_risk(
-                risk_type=result.name,
+                risk_type=_risk_type_for(result),
                 reason=result.detail,
                 evidence_refs=result.evidence_refs,
                 policy_refs=[e.chunk_id for e in state["policy_evidence"]] if result.name == "hotel_limit" else [],

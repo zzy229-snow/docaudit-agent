@@ -68,7 +68,7 @@ streamlit run streamlit_app.py
 | --- | --- | --- | --- |
 | 正常报销：三类材料齐全 | PASS | 无 | 字段、制度、检查项均通过 |
 | 住宿超标 + 主体不一致 | REVIEW_REQUIRED | `HOTEL_LIMIT`、`APPLICANT_MATCH` | 多风险卡片和制度引用 |
-| 缺少付款凭证 | REVIEW_REQUIRED | `REQUIRED_DOCUMENTS`、`AMOUNT_MATCH` | 缺材料导致无法完成金额核对 |
+| 缺少付款凭证 | REVIEW_REQUIRED | `REQUIRED_DOCUMENTS`、`AMOUNT_UNVERIFIABLE` | 缺材料导致无法完成金额核对（缺字段=MIDIUM「无法核对」，不等同于金额不符） |
 | 主体不一致但金额正常 | REVIEW_REQUIRED | `APPLICANT_MATCH` | 金额合规但主体不一致 |
 | 发票日期超出行程 | REVIEW_REQUIRED | `DATE_RANGE` | 日期规则可解释 |
 

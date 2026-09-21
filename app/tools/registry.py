@@ -7,8 +7,8 @@ from app.tools.schema import RegisteredTool, ToolInputSchema, ToolSpec
 from app.tools.subject_tool import compare_subject
 
 
-def _required_documents(document_names: list[str]):
-    return check_required_documents(document_names)
+def _required_documents(document_names: list[str], material_types: list[str] | None = None):
+    return check_required_documents(document_names, material_types)
 
 
 def _amount_match(invoice_amount: str | None, payment_amount: str | None):
@@ -44,9 +44,14 @@ TOOL_REGISTRY: dict[str, RegisteredTool] = {
     "required_documents": RegisteredTool(
         spec=ToolSpec(
             name="required_documents",
-            description="检查差旅报销是否包含发票、付款凭证和审批单",
+            description="检查差旅报销是否包含发票、付款凭证和审批单（材料类型按票面内容判定，文件名兜底）",
             category="document",
-            inputs=[ToolInputSchema(name="document_names", description="上传材料文件名列表")],
+            inputs=[
+                ToolInputSchema(name="document_names", description="内容判不出类型的材料文件名"),
+                ToolInputSchema(name="material_types",
+                                description="按票面内容判出的材料类型(invoice/payment/approval)",
+                                required=False),
+            ],
         ),
         handler=_required_documents,
     ),

@@ -86,10 +86,48 @@ key 只从 `.env` 或命令行读，不回显、不落盘、不写进仓库（`.
 - 字段证据的 `source_text` 记为 `OCR结构化字段：invoice_amount=900.00`，能在报告「字段证据」里追溯到来源；
 - 无字段可抽时仍按 §16 处理：不给合规结论。
 
+## 4.1 百度智能云「增值税发票识别」（现成配置）
+
+百度走的是 `API Key + Secret Key → access_token → 识别接口`，请求体是
+`application/x-www-form-urlencoded` 的 `image=<base64>`。这些差异已封装好，选
+`OCR_ENGINE=baidu` 即可，token 会自动获取、缓存、失效重试。
+
+```dotenv
+OCR_ENGINE=baidu
+BAIDU_OCR_API_KEY=你的API Key          # 百度控制台「应用列表」里的 API Key
+BAIDU_OCR_SECRET_KEY=你的Secret Key    # 同一位置的「应用密钥」(32 位),两个都要
+# 下面这些是默认值,一般不用改
+# BAIDU_OCR_URL=https://aip.baidubce.com/rest/2.0/ocr/v1/vat_invoice
+# BAIDU_OCR_TOKEN_URL=https://aip.baidubce.com/oauth/2.0/token
+```
+
+默认字段映射（对应 `words_result` 里的键）：
+
+| 本项目字段 | 百度字段 | 说明 |
+| --- | --- | --- |
+| `invoice_code` | `InvoiceCode` | 发票代码 |
+| `invoice_number` | `InvoiceNum` | 发票号码（重复发票查重依据） |
+| `invoice_date` | `InvoiceDate` | 开票日期（`2016年06月02日` → `2016-06-02`） |
+| `invoice_amount` | `AmountInFiguers` | **价税合计（小写）**，与付款凭证金额同口径，用于金额一致性核对 |
+| `invoice_buyer` | `PurchaserName` | 购买方 |
+
+刻意**不映射**票面的 `Province`/`City` → `travel_city`：票面地址是**销售方所在地**，
+不等于出差城市，拿去匹配住宿标准会得出错误结论；出差城市仍由审批单/行程单提供。
+若你要的是不含税金额（`TotalAmount`）或税额（`TotalTax`），用 `BAIDU_OCR_FIELD_MAP`
+覆盖即可。
+
+验证（补齐 Secret Key 后一条命令）：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\check_ocr_http.py 我的发票.png --provider baidu
+```
+
 ## 5. 已知边界
 
 - 本适配器不做云厂商签名算法（TC3/OSS 签名等），需要时用 `OCR_HTTP_HEADERS` 传已算好的头，
-  或按你的厂商补一个适配分支；
+  或按你的厂商补一个适配分支（百度已内置，见 4.1）；
 - 接口本身的识别准确率不在本项目实现范围内，评测基线（`docs/EVALUATION.md`）只覆盖主流程逻辑；
-- 材料类型（发票/付款凭证/审批单）目前按**文件名关键词**识别，文件名不含 `invoice`/`payment`/`approval`
-  时会算作材料缺失 —— 上传时建议按规范命名，或告诉我们是否要按票面内容自动判类型。
+- 材料类型默认**按票面内容判定**（发票代码/号码、价税合计、增值税、付款金额、流水号、审批意见等），
+  内容判不出来（例如一页混合了发票和付款信息、或纯白纸）才回退文件名关键词；两类都判不出时
+  按 `other` 处理 —— 宁可提示人工确认，也不假装材料齐全。阈值可用
+  `MATERIAL_MIN_CONTENT_SIGNALS`（默认 2）调整。

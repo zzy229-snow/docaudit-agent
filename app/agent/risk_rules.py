@@ -45,6 +45,8 @@ SEVERITY_RULES: dict[str, str] = {
     "MATERIAL_QUALITY_INFO": "INFO",      # 附录A:材料清晰度较低,仅展示
     # 材料可读性:材料没被真正识别/无证据,不得给结论(必须人工介入)
     "MATERIAL_UNREADABLE": "HIGH",
+    # 字段缺失导致"无法核对"(≠ 金额不符/日期越界),按需核实处理
+    "AMOUNT_UNVERIFIABLE": "MEDIUM",
     # 安全
     "PROMPT_INJECTION": "HIGH",           # PRD §15:文档内容中的指令不得生效
 }

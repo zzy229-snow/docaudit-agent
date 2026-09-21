@@ -243,11 +243,13 @@ def gen_all() -> list[dict]:
         ))
 
     # ---- 缺材料 + 级联风险 ----
+    # 缺材料导致金额字段缺失时,风险码是 AMOUNT_UNVERIFIABLE(缺字段无法核对,MEDIUM),
+    # 只有"两个金额都在但数值不符"才是 AMOUNT_MATCH(HIGH)
     missing_cases = [
-        (["payment.txt"], ["REQUIRED_DOCUMENTS", "AMOUNT_MATCH"]),
+        (["payment.txt"], ["REQUIRED_DOCUMENTS", "AMOUNT_UNVERIFIABLE"]),
         # 缺审批单 -> 无出差城市 -> 检索不到适用条款,输出规则缺失(AC-05)
         (["approval.txt"], ["REQUIRED_DOCUMENTS", "APPLICANT_MATCH", "DATE_RANGE", "RULE_MISSING"]),
-        (["invoice.txt"], ["REQUIRED_DOCUMENTS", "AMOUNT_MATCH", "DATE_RANGE", "HOTEL_LIMIT"]),
+        (["invoice.txt"], ["REQUIRED_DOCUMENTS", "AMOUNT_UNVERIFIABLE", "DATE_RANGE", "HOTEL_LIMIT"]),
     ]
     for idx, (miss, risks) in enumerate(missing_cases):
         add(build_case(
@@ -309,7 +311,7 @@ def gen_all() -> list[dict]:
         "CASE_COMBO_04", "缺发票且日期越界", "北京",
         600, 600, "2026-08-20", "2026-08-01", "2026-08-02",
         APPLICANT, APPLICANT, APPLICANT,
-        "REVIEW_REQUIRED", ["AMOUNT_MATCH", "DATE_RANGE", "HOTEL_LIMIT", "REQUIRED_DOCUMENTS"],
+        "REVIEW_REQUIRED", ["AMOUNT_UNVERIFIABLE", "DATE_RANGE", "HOTEL_LIMIT", "REQUIRED_DOCUMENTS"],
         missing=["invoice.txt"], policy_refs=[],
     ))
     add(build_case(

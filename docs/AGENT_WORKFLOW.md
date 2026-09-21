@@ -257,7 +257,7 @@ parse_documents → extract → retrieve → plan → check → critic
 | `extract` | 字段抽取、证据绑定、人工修正覆盖 | `fields` |
 | `retrieve` | 制度检索与元数据过滤 | `policy_evidence` |
 | `plan` | 生成**受控**审核计划（工具白名单校验） | `AuditPlan` |
-| `check` | 执行 6 个确定性工具（失败按指数退避重试） | `checks` + `risks` + `human_review_items` |
+| `check` | 材料类型判定（票面内容优先）+ 执行 6 个确定性工具（失败按指数退避重试） | `checks` + `risks` + `human_review_items` |
 | `critic` | 复核完整性、证据覆盖率、制度引用 | `CritiqueResult` |
 | `route_review` | 决定 continue / review / fail | `control.route` |
 | `report` | 生成结构化报告 | `AuditReport`（含 plan/critique/失败原因） |
@@ -265,6 +265,23 @@ parse_documents → extract → retrieve → plan → check → critic
 三种路由都收敛到 `report`，由 `control.route` 决定最终状态（`fail` → `FAILED`），
 因此 LangGraph 版与顺序版结论一致；`tests/test_langgraph_workflow.py` 逐用例比对两者
 的状态、风险集合、字段值与计划步骤。
+
+#### 材料类型与"无法核对"的风险口径
+
+`check` 在跑工具前先按**票面内容**判定每份材料的类型（`app/services/material_type.py`）：
+
+- 内容信号（发票代码/号码、价税合计、增值税；付款金额、流水号；审批意见、审批人…）达到
+  `MATERIAL_MIN_CONTENT_SIGNALS`（默认 2）条且第二名不达阈值 → 判为该类型；
+- 内容判不出来（一页混合多类信息、或空白/无关内容）→ 回退文件名关键词；再判不出 → `other`；
+- 判出类型的材料直接把类型交给 `required_documents`，判不出的才交文件名 —— 所以
+  「微信图片_2026.png」里识别出发票号码也算有发票。
+
+风险口径（避免"缺字段"被说成"不合规"）：
+
+| 情况 | 风险码 | 等级 |
+| --- | --- | --- |
+| 发票与付款金额都在、数值不符 | `AMOUNT_MATCH` | HIGH |
+| 金额字段缺失，无法核对 | `AMOUNT_UNVERIFIABLE` | MEDIUM |
 
 #### report 节点的材料可读性门控（`UNDETERMINED`）
 

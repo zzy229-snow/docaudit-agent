@@ -38,7 +38,9 @@ import re
 import shutil
 import subprocess
 import tempfile
+import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from io import BytesIO
 from pathlib import Path
@@ -53,6 +55,21 @@ DEFAULT_TEXT_DENSITY = int(os.environ.get("OCR_TEXT_DENSITY", "20"))
 
 # 项目自带语言包目录(chi_sim + eng),避免污染系统 Tesseract 安装
 DEFAULT_TESSDATA_DIR = Path(__file__).resolve().parents[2] / "data" / "ocr_models" / "tessdata"
+
+#: 百度智能云 增值税发票识别:接口地址与 access_token 地址
+BAIDU_VAT_URL = "https://aip.baidubce.com/rest/2.0/ocr/v1/vat_invoice"
+BAIDU_TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token"
+
+#: 百度发票识别默认字段映射(接口字段 → 本项目字段)。
+#: 价税合计取 AmountInFiguers(小写),与付款凭证金额同口径;票面 Province/City 不映射出差城市
+#: —— 票面地址是销售方所在地,不等于出差城市,拿来匹配住宿标准会得出错误结论。
+BAIDU_VAT_FIELD_MAP: dict[str, str] = {
+    "invoice_code": "InvoiceCode",
+    "invoice_number": "InvoiceNum",
+    "invoice_date": "InvoiceDate",
+    "invoice_amount": "AmountInFiguers",
+    "invoice_buyer": "PurchaserName",
+}
 
 
 def preprocess_image_for_ocr(content: bytes, scale: int = 2) -> bytes:
@@ -310,6 +327,89 @@ class HttpOcrEngine(OcrEngine):
         return fields
 
 
+class BaiduVatInvoiceOcrEngine(HttpOcrEngine):
+    """百度智能云「增值税发票识别」(OCR_ENGINE=baidu)。
+
+    与通用 HttpOcrEngine 的差别:
+    - 鉴权:先用 API Key + Secret Key 换 access_token(缓存复用,过期或 token 失效时自动刷新),
+      再以 access_token 作为查询参数调用识别接口;
+    - 请求:``application/x-www-form-urlencoded``,字段名 ``image=<base64>``;
+    - 响应:``words_result`` 里的结构化字段,按默认映射规范化成本项目字段
+      (价税合计 ``AmountInFiguers`` → ``invoice_amount``,与付款金额同口径)。
+
+    刻意**不**把发票上的 Province/City 映射成 ``travel_city``:票面地址是销售方所在地,
+    不等于出差城市,拿来匹配住宿标准会得出错误结论。
+    """
+
+    name = "baidu"
+
+    def __init__(self, api_key: str = "", secret_key: str = "", url: str = "",
+                 token_url: str = "", timeout_seconds: int = 60,
+                 field_map: dict[str, str] | None = None,
+                 fields_path: str = "words_result", text_path: str = "") -> None:
+        super().__init__(url=url or BAIDU_VAT_URL, api_key=None, timeout_seconds=timeout_seconds,
+                         text_path=text_path, fields_path=fields_path,
+                         field_map=dict(field_map or BAIDU_VAT_FIELD_MAP))
+        self.api_key = api_key
+        self.secret_key = secret_key
+        self.token_url = token_url or BAIDU_TOKEN_URL
+        self._access_token: str | None = None
+        self._token_expires_at: float = 0.0
+        #: 诊断用:token 换了几次
+        self.token_refreshes = 0
+
+    def access_token(self, force: bool = False) -> str:
+        """获取(并缓存)access_token;``force=True`` 时强制刷新。"""
+        if self._access_token and not force and time.time() < self._token_expires_at:
+            return self._access_token
+        if not self.api_key or not self.secret_key:
+            raise RuntimeError(
+                "OCR_ENGINE=baidu 需要 API Key 与 Secret Key:"
+                "请配置 BAIDU_OCR_API_KEY / BAIDU_OCR_SECRET_KEY"
+                "(或 OCR_HTTP_API_KEY / OCR_HTTP_API_KEY_SECRET)")
+        query = urllib.parse.urlencode({
+            "grant_type": "client_credentials",
+            "client_id": self.api_key,
+            "client_secret": self.secret_key,
+        })
+        request = urllib.request.Request(f"{self.token_url}?{query}", method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                data = json.loads(response.read().decode("utf-8"))
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"百度 access_token 获取失败: {exc}") from exc
+        token = data.get("access_token")
+        if not token:
+            raise RuntimeError(
+                "百度 access_token 获取失败:"
+                f"{data.get('error', 'unknown')}/{data.get('error_description', '请检查 API Key 与 Secret Key')}")
+        self._access_token = str(token)
+        self._token_expires_at = time.time() + max(60, int(data.get("expires_in", 2592000)) - 300)
+        self.token_refreshes += 1
+        return self._access_token
+
+    def call(self, content: bytes) -> object:
+        body = urllib.parse.urlencode({"image": base64.b64encode(content).decode("ascii")}).encode("ascii")
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        headers.update(self.extra_headers)
+        for attempt in range(2):
+            token = self.access_token(force=attempt > 0)
+            request = urllib.request.Request(
+                f"{self.url}?access_token={token}", data=body, headers=headers, method="POST")
+            try:
+                with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+            except urllib.error.URLError as exc:
+                raise RuntimeError(f"百度发票识别调用失败: {exc}") from exc
+            code = data.get("error_code") if isinstance(data, dict) else None
+            if code in (110, 111) and attempt == 0:
+                continue     # token 无效/过期:刷新后重试一次
+            if code:
+                raise RuntimeError(f"百度发票识别返回错误 {code}: {data.get('error_msg')}")
+            return data
+        raise RuntimeError("百度发票识别调用失败:access_token 刷新后仍被拒绝")
+
+
 class MineruOcrEngine(OcrEngine):
     """MinerU 引擎:子进程调用 mineru.exe,读取输出 markdown 为文本流。
 
@@ -392,6 +492,20 @@ class RoutingOcrEngine(OcrEngine):
 def get_ocr_engine() -> OcrEngine:
     """工厂:按 OCR_ENGINE 返回 OCR 实例(PRD §8.2 模型路由)。"""
     mode = os.environ.get("OCR_ENGINE", "mock").strip().lower()
+    if mode == "baidu":
+        # 百度智能云 增值税发票识别:API Key + Secret Key 换 token,结构化字段返回
+        return BaiduVatInvoiceOcrEngine(
+            api_key=os.environ.get("BAIDU_OCR_API_KEY") or os.environ.get("OCR_HTTP_API_KEY", ""),
+            secret_key=(os.environ.get("BAIDU_OCR_SECRET_KEY")
+                        or os.environ.get("OCR_HTTP_API_KEY_SECRET", "")
+                        or os.environ.get("OCR_HTTP_SECRET_KEY", "")),
+            url=os.environ.get("BAIDU_OCR_URL", BAIDU_VAT_URL),
+            token_url=os.environ.get("BAIDU_OCR_TOKEN_URL", BAIDU_TOKEN_URL),
+            timeout_seconds=int(os.environ.get("OCR_HTTP_TIMEOUT", "60")),
+            field_map=parse_field_map(os.environ.get("BAIDU_OCR_FIELD_MAP", "")) or None,
+            fields_path=os.environ.get("OCR_HTTP_FIELDS_PATH", "words_result").strip() or "words_result",
+            text_path=os.environ.get("OCR_HTTP_TEXT_PATH", ""),
+        )
     if mode == "stub":
         # 合成语料(仅评测/演示):等价 mock 文本,但被视为"已识别"
         return StubOcrEngine()

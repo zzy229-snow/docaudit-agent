@@ -43,7 +43,9 @@ class AuditTests(unittest.TestCase):
         result = run_audit(files)
         self.assertEqual(result.status, "REVIEW_REQUIRED")
         self.assertTrue(any(r.risk_type == "REQUIRED_DOCUMENTS" for r in result.risks))
-        self.assertTrue(any(r.risk_type == "AMOUNT_MATCH" for r in result.risks))
+        # 金额字段缺失导致"无法核对":按 AMOUNT_UNVERIFIABLE(MEDIUM)处理,不再算成"金额不符"(HIGH)
+        self.assertTrue(any(r.risk_type == "AMOUNT_UNVERIFIABLE" for r in result.risks))
+        self.assertFalse(any(r.risk_type == "AMOUNT_MATCH" for r in result.risks))
 
 
 if __name__ == "__main__":

@@ -989,7 +989,7 @@
     "documents_dir": "data/eval_generated/CASE_MISSING_01",
     "expected_status": "REVIEW_REQUIRED",
     "expected_risks": [
-      "AMOUNT_MATCH",
+      "AMOUNT_UNVERIFIABLE",
       "REQUIRED_DOCUMENTS"
     ],
     "expected_fields": {
@@ -1039,7 +1039,7 @@
     "documents_dir": "data/eval_generated/CASE_MISSING_03",
     "expected_status": "REVIEW_REQUIRED",
     "expected_risks": [
-      "AMOUNT_MATCH",
+      "AMOUNT_UNVERIFIABLE",
       "DATE_RANGE",
       "HOTEL_LIMIT",
       "REQUIRED_DOCUMENTS"
@@ -1303,7 +1303,7 @@
     "documents_dir": "data/eval_generated/CASE_COMBO_04",
     "expected_status": "REVIEW_REQUIRED",
     "expected_risks": [
-      "AMOUNT_MATCH",
+      "AMOUNT_UNVERIFIABLE",
       "DATE_RANGE",
       "HOTEL_LIMIT",
       "REQUIRED_DOCUMENTS"
