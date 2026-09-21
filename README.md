@@ -91,6 +91,13 @@ python -m app.services.model_smoke
 python -m unittest discover -s tests -v
 ```
 
+测试**不读 `.env`**：本机 ``.env`` 里可以配真实 OCR（如 `OCR_ENGINE=baidu`）或真实模型，
+测试仍全程离线、可复现。两个原因值得知道：一是 `app.config.load_environment` 在 unittest
+下会跳过 `.env`（`AUDIT_LOAD_DOTENV=1` 可强制读）；二是 `pymilvus` 这类第三方库在 import 时
+会自己 `load_dotenv()`，而 venv 位于仓库内时它会找到仓库 `.env`，所以引擎敏感的测试模块会在
+导入前显式钉住 `OCR_ENGINE=mock`。评测同理，默认强制 `OCR_ENGINE=stub` 合成语料引擎
+（想用真引擎跑评测设 `EVAL_OCR_ENGINE=baidu`）。
+
 ## 评测基线
 
 ```bash
