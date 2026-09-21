@@ -37,6 +37,7 @@ python -m uvicorn app.api.main:app --reload --port 8102
 
 - 六项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性、重复发票查重。
 - 材料可读性判定：材料没被真正识别（演示引擎文本、解析为空、抽不到任何字段）时**不给结论**，任务状态为 `UNDETERMINED`（无法判定），只保留一条 `MATERIAL_UNREADABLE` 风险并说明改法 —— 避免"上传 A 发票、结论却是 B 发票"的误导。结论状态：`PASS` / `REVIEW_REQUIRED` / `UNDETERMINED` / `FAILED`。
+- 发票 OCR 接入：`OCR_ENGINE=http` 支持两种接口形态 —— 返回整段文本（`OCR_HTTP_TEXT_PATH`）或**直接返回结构化字段**（`OCR_HTTP_FIELDS_PATH` + `OCR_HTTP_FIELD_MAP`，发票专用接口推荐），结构化字段优先级高于版式正则、冲突写进 trace；`scripts/check_ocr_http.py` 可一条命令验证接口（详见 `docs/OCR_INTEGRATION.md`）。
 - 演示模式提示：`OCR_ENGINE=mock` / `MODEL_PROVIDER=mock` 时，工作台顶部与新建审核页会明确标出"当前不识别真实材料"，不再让人误以为系统读错了。
 - 报销单命名：展示名按 **日期区间 + 人物 + 事件** 自动生成（如 `2026.9.18-9.19 张三 住宿报销`），技术编号 `task-xxx` 退居次要；新建审核可填备注/事由作为“事件”，运行审核后按材料自动补全日期，支持改名且改名后不被覆盖；备注里已写的日期/人物不会重复拼接。
 - 风险四级分级：HIGH/MEDIUM/LOW/INFO，HIGH 必须人工复核、LOW/INFO 仅提示（PRD 附录A）。

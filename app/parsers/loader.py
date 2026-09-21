@@ -12,21 +12,36 @@ from app.parsers.ocr import OcrEngine, get_ocr_engine
 MAX_BYTES = 8 * 1024 * 1024
 
 
-def parse_document(file_name: str, content: bytes, ocr_engine: OcrEngine | None = None) -> Document:
+def parse_document(file_name: str, content: bytes, ocr_engine: OcrEngine | None = None,
+                   field_sink: dict | None = None) -> Document:
     """PRD §6.2 文件处理策略分发:类型识别 → 首选路径 → 回退路径(OCR)。
 
     任务④:OCR 路径同时评估困难区域(手写/低质),以 document_type 后缀标记
     (如 image_ocr_handwriting),供审核流程标记人工复核;不修改 Document 契约字段。
+
+    ``field_sink``:发票专用 OCR 接口直接返回结构化字段时,引擎把它们放在
+    ``engine.last_fields``;传入 sink 后由这里收集(键为项目字段名,值为规范化字符串),
+    供上层优先采用(见 app/agent/nodes.py 的 extract 节点)。
     """
     if not content or len(content) > MAX_BYTES:
         raise ValueError("文件不能为空且不得超过8MB")
     engine = ocr_engine or get_ocr_engine()
+
+    def collect_fields() -> None:
+        if field_sink is None:
+            return
+        fields = getattr(engine, "last_fields", None) or {}
+        if fields:
+            field_sink.update(fields)
+            setattr(engine, "last_fields", {})
+
     suffix = Path(file_name).suffix.lower()
     if suffix == ".pdf":
         # 首选:电子文本;回退:文本密度过低转 OCR(§6.2)
         pages = extract_pdf_text(content)
         if is_low_density(pages):
             text = engine.recognize(content)
+            collect_fields()
             assessment = assess(text=text)   # PDF 字节无法做图片质量分析,仅评估文本质量
             pages = [Page(number=1, text=text)]
             doc_type = "pdf_ocr" + doc_type_suffix(assessment)
@@ -34,6 +49,7 @@ def parse_document(file_name: str, content: bytes, ocr_engine: OcrEngine | None 
             doc_type = "pdf_text"
     elif suffix in {".png", ".jpg", ".jpeg"}:
         text = parse_image(content, engine)
+        collect_fields()
         assessment = assess(content=content, text=text)
         pages = [Page(number=1, text=text)]
         doc_type = "image_ocr" + doc_type_suffix(assessment)

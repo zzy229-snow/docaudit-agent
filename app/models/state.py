@@ -151,6 +151,8 @@ class AuditState(TypedDict, total=False):
     # 任务④/§15:困难区域与指令注入记录
     hard_regions: list[dict]
     injection_hits: list[dict]
+    #: 发票专用 OCR 接口返回的结构化字段(项目字段名 → 规范化值),优先于正则抽取
+    ocr_fields: dict[str, str]
     # §7.2:受控审核计划与自检结果
     audit_plan: Any
     critique: Any

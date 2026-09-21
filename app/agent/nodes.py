@@ -32,7 +32,10 @@ def _retry_backoff_seconds() -> float:
 
 def parse_documents(state: dict) -> dict:
     started_at = start_node(state, "parse_documents", "开始解析上传材料")
-    documents = [parse_document(name, content) for name, content in state["files"]]
+    # 发票专用 OCR 接口返回的结构化字段在解析时收集(见 loader.parse_document 的 field_sink)
+    ocr_fields: dict[str, str] = {}
+    documents = [parse_document(name, content, field_sink=ocr_fields)
+                 for name, content in state["files"]]
     # 任务④:收集 OCR 困难区域(手写/低质),供后续标记人工复核
     hard_regions = []
     for doc in documents:
@@ -60,6 +63,7 @@ def parse_documents(state: dict) -> dict:
         "documents": documents,
         "hard_regions": hard_regions,
         "injection_hits": injection_hits,
+        "ocr_fields": ocr_fields,
         "trace": state["trace"],
     }
 
@@ -77,6 +81,27 @@ def extract(state: dict) -> dict:
             f"rejected={len(diag.rejected_fields)}, "
             f"fallback_used={diag.fallback_used}"
         )
+    # 发票专用 OCR 接口的结构化字段:精度高于版面正则,优先采用(人工修正仍然最高)
+    api_fields = state.get("ocr_fields") or {}
+    if api_fields:
+        conflicts: list[str] = []
+        for name, value in api_fields.items():
+            current = fields.get(name)
+            if current is not None and str(current.value) != str(value):
+                conflicts.append(f"{name}(接口={value} 规则={current.value})")
+            fields[name] = ExtractedField(
+                name=name,
+                value=value,
+                confidence=0.99,
+                document_id="ocr-api",
+                page_no=1,
+                source_text=f"OCR结构化字段：{name}={value}",
+            )
+        state.setdefault("trace", []).append(
+            f"ocr_structured_fields: 采用{len(api_fields)}项接口结构化字段（优先于规则抽取）")
+        if conflicts:
+            state.setdefault("trace", []).append(
+                f"ocr_structured_fields_conflict: 接口值与规则抽取不一致,已采用接口值 —— {';'.join(conflicts)}")
     for name, override in state.get("field_overrides", {}).items():
         reason = override.get("reason", "人工修正")
         value = override["value"]

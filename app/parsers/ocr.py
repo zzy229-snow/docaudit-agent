@@ -13,7 +13,7 @@
 - 困难区域评估见 app/parsers/region.py,评估结果决定引擎路由与人工复核标记。
 
 环境变量:
-- OCR_ENGINE            mock(默认) | tesseract | http | mineru | auto
+- OCR_ENGINE            mock(默认) | tesseract | http | mineru | auto | stub
 - TESSERACT_EXE         tesseract 可执行文件路径(默认从 PATH 查找)
 - TESSERACT_LANG        识别语言,默认 chi_sim+eng
 - TESSERACT_DATA_DIR    语言包目录(含 chi_sim.traineddata;默认项目 data/ocr_models/tessdata)
@@ -21,7 +21,10 @@
 - OCR_HTTP_URL          OCR HTTP 服务地址
 - OCR_HTTP_API_KEY      OCR HTTP 服务密钥(可选)
 - OCR_HTTP_TIMEOUT      OCR HTTP 超时秒数,默认 60
-- OCR_HTTP_TEXT_PATH    返回 JSON 中文本字段路径,默认 data.text
+- OCR_HTTP_TEXT_PATH    返回 JSON 中文本字段路径,默认 data.text(置空则不取文本)
+- OCR_HTTP_FIELDS_PATH  返回 JSON 中结构化字段所在对象路径,如 words_result / data.invoice
+- OCR_HTTP_FIELD_MAP    字段映射 JSON,如 {"invoice_number":"InvoiceNum","invoice_amount":"TotalAmount"}
+- OCR_HTTP_HEADERS      额外请求头 JSON(如腾讯云签名头),与 Bearer key 并存
 - MINERU_EXE            mineru 可执行文件路径(Windows: .venv/Scripts/mineru.exe)
 - MODELSCOPE_CACHE      模型缓存目录(缺省时使用 MINERU_MODELS 同目录 models/)
 - MINERU_MODEL_SOURCE   模型源,默认 modelscope
@@ -31,6 +34,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -218,19 +222,56 @@ class HttpOcrEngine(OcrEngine):
       "options": {"language": "zh,en"}
     }
 
-    默认从返回 JSON 的 data.text 字段读取识别文本。不同供应商可通过
-    OCR_HTTP_TEXT_PATH 调整字段路径,例如 result.text 或 text。
+    文本模式:从返回 JSON 的 ``text_path`` 读取整段识别文本(默认 ``data.text``,
+    可用 OCR_HTTP_TEXT_PATH 调整,如 ``result.text``;置空则不取文本字段)。
+
+    结构化字段模式:发票专用 OCR 接口通常直接返回结构化字段而不是整段文本。
+    配置 ``fields_path``(字段所在对象路径,如 ``words_result``)与 ``field_map``
+    (项目字段名 → 该对象内的字段路径)后,引擎会取值并规范化(日期 ISO、金额去符号、
+    号码去分隔符),通过 ``last_fields`` 交给上层,优先于正则抽取;若接口没有整段
+    文本,会用这些字段拼一段可读文本,保证下游质量评估与证据链正常。
     """
 
     name = "http"
 
-    def __init__(self, url: str, api_key: str | None = None, timeout_seconds: int = 60, text_path: str = "data.text") -> None:
+    def __init__(self, url: str, api_key: str | None = None, timeout_seconds: int = 60,
+                 text_path: str = "data.text", fields_path: str = "",
+                 field_map: dict[str, str] | None = None,
+                 extra_headers: dict[str, str] | None = None) -> None:
         self.url = url
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds
         self.text_path = text_path
+        self.fields_path = fields_path
+        self.field_map = dict(field_map or {})
+        self.extra_headers = dict(extra_headers or {})
+        #: 最近一次调用取到的结构化字段(项目字段名 → 规范化后的值)
+        self.last_fields: dict[str, str] = {}
 
     def recognize(self, content: bytes) -> str:
+        if not self.url:
+            raise RuntimeError("OCR_ENGINE=http 时必须配置 OCR_HTTP_URL")
+        data = self.call(content)
+        fields = self.extract_fields(data)
+        text = ""
+        if self.text_path:
+            raw = _get_by_path(data, self.text_path)
+            if isinstance(raw, str):
+                text = raw.strip()
+        if not text and fields:
+            # 结构化接口没有整段文本:用字段拼一段可读文本,保证下游质量评估/证据链可用
+            text = text_from_fields(fields)
+        if not text:
+            raise RuntimeError(
+                "OCR HTTP 响应中未找到文本字段"
+                f"({self.text_path or '未配置'})，也未按 OCR_HTTP_FIELDS_PATH/OCR_HTTP_FIELD_MAP"
+                f" 取到结构化字段({self.fields_path or '未配置'})"
+            )
+        self.last_fields = fields
+        return text
+
+    def call(self, content: bytes) -> object:
+        """调用一次 HTTP 接口并返回解析后的 JSON(重试/诊断脚本复用)。"""
         if not self.url:
             raise RuntimeError("OCR_ENGINE=http 时必须配置 OCR_HTTP_URL")
         payload = {
@@ -240,6 +281,7 @@ class HttpOcrEngine(OcrEngine):
         headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
+        headers.update(self.extra_headers)
         request = urllib.request.Request(
             self.url,
             data=json.dumps(payload).encode("utf-8"),
@@ -251,11 +293,21 @@ class HttpOcrEngine(OcrEngine):
                 body = response.read().decode("utf-8")
         except urllib.error.URLError as exc:
             raise RuntimeError(f"OCR HTTP 服务调用失败: {exc}") from exc
-        data = json.loads(body)
-        text = _get_by_path(data, self.text_path)
-        if not isinstance(text, str) or not text.strip():
-            raise RuntimeError(f"OCR HTTP 响应中未找到文本字段: {self.text_path}")
-        return text.strip()
+        return json.loads(body)
+
+    def extract_fields(self, data: object) -> dict[str, str]:
+        """按 OCR_HTTP_FIELDS_PATH + OCR_HTTP_FIELD_MAP 取出并规范化结构化字段。"""
+        if not self.fields_path or not self.field_map:
+            return {}
+        container = _get_by_path(data, self.fields_path)
+        if not isinstance(container, dict):
+            return {}
+        fields: dict[str, str] = {}
+        for name, path in self.field_map.items():
+            value = normalize_ocr_value(name, _get_by_path(container, path))
+            if value:
+                fields[name] = value
+        return fields
 
 
 class MineruOcrEngine(OcrEngine):
@@ -356,6 +408,9 @@ def get_ocr_engine() -> OcrEngine:
             api_key=os.environ.get("OCR_HTTP_API_KEY"),
             timeout_seconds=int(os.environ.get("OCR_HTTP_TIMEOUT", "60")),
             text_path=os.environ.get("OCR_HTTP_TEXT_PATH", "data.text"),
+            fields_path=os.environ.get("OCR_HTTP_FIELDS_PATH", "").strip(),
+            field_map=parse_field_map(os.environ.get("OCR_HTTP_FIELD_MAP", "")),
+            extra_headers=parse_headers(os.environ.get("OCR_HTTP_HEADERS", "")),
         )
     if mode == "mineru":
         return _build_mineru_engine()
@@ -389,3 +444,97 @@ def _get_by_path(data: dict, path: str):
             return None
         current = current[part]
     return current
+
+
+# ---------------- 结构化字段(发票专用 OCR 接口) ----------------
+
+#: 结构化字段名 → 拼文本时用的中文标签(与规则抽取器的标签保持一致)
+FIELD_TEXT_LABELS: dict[str, str] = {
+    "invoice_code": "发票代码",
+    "invoice_number": "发票号码",
+    "invoice_date": "开票日期",
+    "invoice_amount": "发票金额",
+    "payment_amount": "付款金额",
+    "invoice_buyer": "购买方",
+    "payment_party": "付款方",
+    "travel_city": "出差城市",
+    "travel_start_date": "出差开始",
+    "travel_end_date": "出差结束",
+    "applicant_name": "申请人",
+}
+
+_AMOUNT_RE = re.compile(r"-?\d+(?:\.\d{1,2})?")
+_DATE_PARTS_RE = re.compile(r"(\d{4})\D{0,2}(\d{1,2})\D{0,2}(\d{1,2})")
+
+
+def normalize_ocr_value(field_name: str, raw: object) -> str:
+    """把 OCR 接口返回的原始值规范化成本项目的字段值。
+
+    - 日期类:``2019年02月19日`` / ``2019/2/19`` / ``2019-02-19 00:00:00`` → ``2019-02-19``
+    - 金额类:``¥900.00`` / ``￥1,280.00元`` / ``900`` → ``900.00`` / ``1280.00``
+    - 号码类:去掉空格与分隔符(``1234 5678`` → ``12345678``)
+    - 其余:折叠空白(字符串直接保留)
+    - 接口把字段包成 ``{"value": ...}`` / ``{"text": ...}`` / ``{"word": ...}`` 时自动取内层值
+    """
+    if raw is None:
+        return ""
+    if isinstance(raw, dict):
+        for key in ("value", "text", "word", "content"):
+            if raw.get(key) not in (None, ""):
+                return normalize_ocr_value(field_name, raw.get(key))
+        return ""
+    if isinstance(raw, (list, tuple)):
+        return " ".join(part for part in (normalize_ocr_value(field_name, item) for item in raw) if part)
+    text = str(raw).strip()
+    if not text:
+        return ""
+    key = field_name.lower()
+    if "date" in key:
+        return _normalize_date(text)
+    if "amount" in key:
+        match = _AMOUNT_RE.search(text.replace(",", ""))
+        return f"{float(match.group()):.2f}" if match else ""
+    if "number" in key or "code" in key:
+        return re.sub(r"[^0-9A-Za-z]", "", text)
+    return " ".join(text.split())
+
+
+def _normalize_date(text: str) -> str:
+    match = _DATE_PARTS_RE.search(text)
+    if not match:
+        return " ".join(text.split())
+    year, month, day = (int(part) for part in match.groups())
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def text_from_fields(fields: dict[str, str]) -> str:
+    """结构化字段 → 可读文本(接口不返回整段文本时的兜底)。"""
+    parts = [f"{FIELD_TEXT_LABELS.get(name, name)}：{value}"
+             for name, value in fields.items() if value]
+    return ("OCR结构化字段 " + " ".join(parts)).strip()
+
+
+def parse_field_map(raw: str | None) -> dict[str, str]:
+    """解析 OCR_HTTP_FIELD_MAP(JSON:项目字段名 → 接口字段路径)。"""
+    if not raw or not raw.strip():
+        return {}
+    try:
+        mapping = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"OCR_HTTP_FIELD_MAP 不是合法 JSON: {exc}") from exc
+    if not isinstance(mapping, dict):
+        raise RuntimeError("OCR_HTTP_FIELD_MAP 必须是 JSON 对象,如 {\"invoice_number\":\"InvoiceNum\"}")
+    return {str(name): str(path) for name, path in mapping.items()}
+
+
+def parse_headers(raw: str | None) -> dict[str, str]:
+    """解析 OCR_HTTP_HEADERS(JSON:请求头)。"""
+    if not raw or not raw.strip():
+        return {}
+    try:
+        headers = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"OCR_HTTP_HEADERS 不是合法 JSON: {exc}") from exc
+    if not isinstance(headers, dict):
+        raise RuntimeError("OCR_HTTP_HEADERS 必须是 JSON 对象,如 {\"X-Api-Key\":\"...\"}")
+    return {str(name): str(value) for name, value in headers.items()}
