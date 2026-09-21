@@ -12,6 +12,7 @@ from app.evaluation.runner import run_evaluation
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
 from app.services.report_exporter import build_html_report
 from app.services.task_naming import build_report_title, safe_file_name
+from app.services.readability import demo_mode_notice, is_synthetic_engine
 
 load_dotenv()
 
@@ -116,6 +117,10 @@ def result_label(task: AuditTask) -> str:
         return "-"
     if task.report.status == "PASS":
         return "通过"
+    if task.report.status == "UNDETERMINED":
+        return "无法判定（材料未识别）"
+    if task.report.status == "FAILED":
+        return "失败"
     return "需复核"
 
 
@@ -453,6 +458,8 @@ with st.sidebar:
     st.metric("OCR模式", os.getenv("OCR_ENGINE", "mock"))
     st.metric("RAG模式", os.getenv("RAG_MODE", "mock"))
     st.metric("任务存储", os.getenv("AUDIT_TASK_STORE", "sqlite"))
+    if is_synthetic_engine():
+        st.caption("⚠️ OCR模式=mock 表示不识别图片/扫描件，上传这类材料会得到“无法判定”。")
 
     st.divider()
     st.header("快速演示")
@@ -481,11 +488,22 @@ st.title("DocAudit Agent 审核工作台")
 st.caption("面向企业报销材料的可解释审核系统：任务持久化、字段证据、制度依据、人工复核和审计事件。")
 
 tasks = task_store.list_tasks()
+# 演示模式横幅:不识别真实材料的配置必须在最显眼处说清楚(否则客户会以为系统"读错了")
+demo_notice = demo_mode_notice()
+if demo_notice:
+    st.warning(f"⚠️ {demo_notice}", icon="⚠️")
+
 overview_left, overview_mid, overview_right, overview_fourth = st.columns(4)
 overview_left.metric("任务总数", len(tasks))
 overview_mid.metric("待审核", sum(1 for item in tasks if item.status == "READY"))
 overview_right.metric("需复核", sum(1 for item in tasks if item.report and item.report.status == "REVIEW_REQUIRED"))
 overview_fourth.metric("已通过", sum(1 for item in tasks if item.report and item.report.status == "PASS"))
+if any(item.report and item.report.status == "UNDETERMINED" for item in tasks):
+    st.caption(
+        "无法判定 "
+        f"{sum(1 for item in tasks if item.report and item.report.status == 'UNDETERMINED')} "
+        "单：材料没被真正识别出来，系统不会给结论（点开可见原因与改法）。"
+    )
 
 # 状态驱动的视图切换(替代 st.tabs:"打开任务"可以直接跳到审核详情)
 view = st.radio(
@@ -548,6 +566,14 @@ elif view == NAV_CREATE:
         type=["pdf", "txt", "docx", "xlsx", "png", "jpg", "jpeg"],
         accept_multiple_files=True,
     )
+    if uploads and is_synthetic_engine():
+        scan_names = [f.name for f in uploads if not f.name.lower().endswith((".txt", ".docx", ".xlsx"))]
+        if scan_names:
+            st.error(
+                "当前 OCR 引擎是演示模式（OCR_ENGINE=" + os.getenv("OCR_ENGINE", "mock") + "），"
+                f"不会真正识别 {'、'.join(scan_names)} 这类图片/扫描件；提交后本次会被标记为“无法判定”。"
+                "要真读材料，请在 .env 里配置 OCR_ENGINE=tesseract|http|mineru 后重启服务。"
+            )
     if st.button("创建上传任务", type="primary"):
         if not uploads:
             st.warning("请先上传材料。")

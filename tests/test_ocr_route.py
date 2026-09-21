@@ -1,5 +1,6 @@
 """PRD §6.2 文件处理策略路由测试:电子文本 / 扫描PDF / 图片三类分流。"""
 
+import os
 import unittest
 from io import BytesIO
 from unittest.mock import patch
@@ -101,8 +102,23 @@ class OcrRouteTests(unittest.TestCase):
         self.assertFalse(is_low_density([Page(number=1, text="发票金额：1280.00元" * 10)], min_chars=50))
 
     def test_image_chain_reaches_report(self):
-        """端到端:图片扫描件经 OCR → 抽取 → 检查 → 报告(缺少材料应触发风险)。"""
+        """端到端:演示引擎(OCR_ENGINE=mock)下图片材料不能被判定。
+
+        图片从未被真正识别,解析出的是内置演示文本 —— 结论必须是"无法判定"并说明改法,
+        而不是给出看起来有效、实则与上传材料无关的结论。
+        """
         result = run_audit([("invoice.jpg", make_image())])
+        self.assertEqual(result.status, "UNDETERMINED")
+        self.assertEqual(result.risks[0].risk_type, "MATERIAL_UNREADABLE")
+        # 未识别文本里抽出来的字段不是证据,不进入报告
+        self.assertEqual(result.fields, {})
+        self.assertIn("OCR_ENGINE", result.failure_reason or "")
+        self.assertIn("material_unreadable", "".join(result.trace))
+
+    def test_synthetic_corpus_engine_keeps_pipeline_conclusions(self):
+        """OCR_ENGINE=stub(合成语料,按"已识别"对待)时链路照常给出结论。"""
+        with patch.dict(os.environ, {"OCR_ENGINE": "stub"}):
+            result = run_audit([("invoice.jpg", make_image())])
         self.assertEqual(result.status, "REVIEW_REQUIRED")
         self.assertTrue(any(r.risk_type == "REQUIRED_DOCUMENTS" for r in result.risks))
         self.assertEqual(result.fields["invoice_amount"].value, "520.00")

@@ -102,6 +102,22 @@ class MockOcrEngine(OcrEngine):
         return self.MOCK_TEXT
 
 
+class StubOcrEngine(MockOcrEngine):
+    """合成语料引擎(仅评测/演示):文本不带演示标记,按"已识别"对待。
+
+    与 ``mock`` 的唯一区别:mock 表示"没接真实 OCR,材料未被识别",会被材料可读性
+    判定拦下(``app.services.readability``)并判为"无法判定";stub 明确声明喂进去的
+    是合成语料(离线评测/回归用),不代表真实 OCR 能力。
+    """
+
+    name = "stub"
+    MOCK_TEXT = (
+        "发票号码：INV-MOCK-2026-001 发票金额：520.00元 开票日期：2026-05-12\n"
+        "付款金额：520.00元 付款时间：2026-05-13 流水号：PAY-MOCK-001\n"
+        "出差城市：杭州 出差开始：2026-05-10 出差结束：2026-05-12 申请人：张三\n"
+    )
+
+
 class TesseractOcrEngine(OcrEngine):
     """本地 Tesseract OCR 引擎(任务④:中文语言包 + 质量自适应多策略)。
 
@@ -324,6 +340,9 @@ class RoutingOcrEngine(OcrEngine):
 def get_ocr_engine() -> OcrEngine:
     """工厂:按 OCR_ENGINE 返回 OCR 实例(PRD §8.2 模型路由)。"""
     mode = os.environ.get("OCR_ENGINE", "mock").strip().lower()
+    if mode == "stub":
+        # 合成语料(仅评测/演示):等价 mock 文本,但被视为"已识别"
+        return StubOcrEngine()
     if mode == "tesseract":
         return TesseractOcrEngine(
             exe=os.environ.get("TESSERACT_EXE", "tesseract"),

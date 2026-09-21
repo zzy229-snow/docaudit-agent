@@ -13,6 +13,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, Iterator
 
+import os
+
 from pydantic import BaseModel, Field, model_validator
 
 from app.agent.graph import run_audit
@@ -35,6 +37,27 @@ def _isolated_eval_state(isolate: bool) -> Iterator[None]:
         return
     with isolated_registry(), isolated_policy_store():
         yield
+
+
+@contextmanager
+def _synthetic_corpus_scope() -> Iterator[None]:
+    """评测语料是合成文本:未显式配置真实 OCR 时用 ``OCR_ENGINE=stub`` 跑。
+
+    stub 引擎产出与 mock 相同的合成文本,但按"已识别"对待 —— 否则材料可读性判定
+    (``app.services.readability``)会把所有含图片材料的用例判成"无法判定",评测基线
+    就不再反映主流程行为。仅在本次调用内临时生效,退出即还原,不影响服务进程后续
+    真实请求;若调用方已显式配置了真实引擎(tesseract/http/mineru/auto)则不覆盖。
+    """
+    previous = os.environ.get("OCR_ENGINE")
+    if previous is None or previous.strip().lower() in {"", "mock", "none", "off"}:
+        os.environ["OCR_ENGINE"] = "stub"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("OCR_ENGINE", None)
+        else:
+            os.environ["OCR_ENGINE"] = previous
 
 
 class EvaluationCase(BaseModel):
@@ -276,7 +299,7 @@ def run_evaluation(
     ``isolate_invoice_registry`` 默认开启:把发票查重登记表指向临时文件,
     这样重复发票用例在每次运行中都从干净历史开始,结论可复现。
     """
-    with _isolated_eval_state(isolate_invoice_registry):
+    with _isolated_eval_state(isolate_invoice_registry), _synthetic_corpus_scope():
         cases = load_cases(cases_path)
         results = [run_case(case, repo_root=repo_root) for case in cases]
     total = len(results)

@@ -84,6 +84,34 @@ CREATED -> READY -> COMPLETED
 | `COMPLETED` | 审核完成，可以查询字段、风险和轨迹 |
 | `FAILED` | 审核运行失败，任务概要中会返回 `error` |
 
+### 5.1 审核结论（`result_status`）
+
+审核完成后的结论有四种，前两种是"对材料给出的判断"，后两种是"系统明确说明自己给不出判断"：
+
+| 结论 | 含义 | 前端展示 |
+| --- | --- | --- |
+| `PASS` | 未发现 HIGH/MEDIUM 风险 | 通过 |
+| `REVIEW_REQUIRED` | 存在 HIGH/MEDIUM 风险，需人工复核 | 需复核 |
+| `UNDETERMINED` | **材料未被真正识别**（演示引擎文本 / 解析为空 / 抽不到任何字段），系统不给结论；只输出一条 `MATERIAL_UNREADABLE`（HIGH）风险说明原因与改法 | 无法判定（材料未识别） |
+| `FAILED` | 流程本身失败（步数/预算/无进展），`failure_reason` 给出原因 | 失败 |
+
+`UNDETERMINED` 的典型触发条件：
+
+```text
+OCR_ENGINE=mock（演示模式）  +  上传图片/扫描件  -> 解析出的是内置演示文本
+OCR 只吐出乱码或空白（有效文本不足 12 字）
+材料解析成功但一个字段都没抽到（无证据即无结论）
+```
+
+此时报告里的 `fields` 为空（人工填写/修正过的字段保留），`failure_reason` 说明怎么改：
+
+```json
+{
+  "status": "UNDETERMINED",
+  "failure_reason": "invoice.png 的内容并未被真正识别：当前 OCR 引擎是演示模式（OCR_ENGINE=mock），系统解析出的是内置演示文本，与上传材料无关。……请在 .env 配置真实 OCR 引擎（OCR_ENGINE=tesseract|http|mineru）后重新提交。"
+}
+```
+
 ## 6. 本地测试
 
 运行完整测试：
@@ -198,6 +226,8 @@ curl -X POST "http://127.0.0.1:8102/api/v1/policies/UP-XXXXXXXX/publish?switch_v
 - 当前报告导出为 HTML，尚未提供 PDF 原生生成。
 - 尚未实现幂等请求 ID、文件去重和任务恢复锁。
 - RAG_MODE=milvus 时，新发布制度的向量索引重建仍需要单独运行构建脚本（local 模式即时生效）。
+- **已知边界：默认配置（`OCR_ENGINE=mock`）不识别图片/扫描件，这类材料会得到"无法判定"而不是结论**；识别能力取决于配置的引擎（Tesseract/HTTP/MinerU），引擎本身的准确率不在本项目的实现范围内。
+- 材料可读性判定按"演示文本标记 / 有效文本长度 / 是否抽到字段"三条确定性规则判断，不做图像质量评分；极端情况下（清晰图片但正文不含任何可抽字段）会判为无法判定，需要人工补充字段后重跑。
 
 这些限制是当前生产化改造的下一批边界，不应在对外说明中夸大。
 

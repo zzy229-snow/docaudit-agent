@@ -64,7 +64,8 @@ class CritiqueResult(BaseModel):
 
 class AuditReport(BaseModel):
     #: PRD §4.2 任务状态:PASS / REVIEW_REQUIRED / FAILED(不可自动恢复的失败)
-    status: Literal["PASS", "REVIEW_REQUIRED", "FAILED"]
+    #: UNDETERMINED:材料未被真正识别或无可用于检查的证据 —— 不给结论,避免误导
+    status: Literal["PASS", "REVIEW_REQUIRED", "FAILED", "UNDETERMINED"]
     fields: dict[str, ExtractedField]
     policy_evidence: list[PolicyEvidence] = []
     checks: list[CheckResult] = []

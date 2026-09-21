@@ -43,6 +43,8 @@ SEVERITY_RULES: dict[str, str] = {
     "HANDWRITING_REVIEW": "MEDIUM",       # PRD §6.4:手写金额/日期必须人工确认
     "OCR_QUALITY_REVIEW": "MEDIUM",       # 困难区域默认转人工;材料仍可读时降级为 INFO
     "MATERIAL_QUALITY_INFO": "INFO",      # 附录A:材料清晰度较低,仅展示
+    # 材料可读性:材料没被真正识别/无证据,不得给结论(必须人工介入)
+    "MATERIAL_UNREADABLE": "HIGH",
     # 安全
     "PROMPT_INJECTION": "HIGH",           # PRD §15:文档内容中的指令不得生效
 }

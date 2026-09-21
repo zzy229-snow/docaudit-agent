@@ -14,9 +14,11 @@ from app.models.field import ExtractedField
 from app.services.invoice_registry import isolate_registry
 from app.services.task_naming import (
     build_report_title,
+    contains_name,
     event_label,
     format_date_range,
     format_single_date,
+    has_date,
     parse_date_parts,
     safe_file_name,
     sanitize_title,
@@ -128,6 +130,37 @@ class TitleBuildTests(unittest.TestCase):
         title = title_from_fields(fields, expense_type="HOTEL", applicant="李四")
 
         self.assertEqual(title, "2026.8.1 李四 住宿报销")
+
+    def test_event_with_date_is_not_duplicated(self):
+        """备注里已经写了日期 → 不再自动拼日期段。"""
+        title = build_report_title(applicant="张三", expense_type="HOTEL",
+                                   start_date="2026-05-10", end_date="2026-05-12",
+                                   event="2019.2.19 住宿报销")
+
+        self.assertEqual(title, "2019.2.19 张三 住宿报销")
+
+    def test_event_with_person_is_not_duplicated(self):
+        """备注里已经写了人物 → 不再自动拼人物段。"""
+        title = build_report_title(applicant="张三", expense_type="HOTEL",
+                                   start_date="2026-05-10", end_date="2026-05-12",
+                                   event="出差 张三")
+
+        self.assertEqual(title, "2026.5.10-5.12 出差 张三")
+
+    def test_fully_self_described_event_replaces_all_segments(self):
+        """实机反馈:备注写全了"日期+人物+事件"时,名称与备注一致,不再重复拼接。"""
+        title = build_report_title(applicant="张三", expense_type="HOTEL",
+                                   start_date="2026-05-10", end_date="2026-05-12",
+                                   event="2019.2.19 张三 住宿报销")
+
+        self.assertEqual(title, "2019.2.19 张三 住宿报销")
+
+    def test_event_helpers(self):
+        self.assertTrue(has_date("2019.2.19 张三 住宿报销"))
+        self.assertFalse(has_date("住宿报销"))
+        self.assertTrue(contains_name("2019.2.19 张三 住宿报销", "张三"))
+        self.assertFalse(contains_name("2019.2.19 张三 住宿报销", "李四"))
+        self.assertFalse(contains_name("住宿报销", ""))
 
     def test_safe_file_name(self):
         self.assertEqual(safe_file_name("2026.9.18-9.19 张三 住宿报销"), "2026.9.18-9.19_张三_住宿报销")

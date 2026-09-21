@@ -115,6 +115,31 @@ def event_label(expense_type: str | None = None, event: str | None = None) -> st
     return ""
 
 
+def has_date(text: str | None) -> bool:
+    """文本里是否已含日期(用户自己写在备注/事由里的)。
+
+    只认带年份的写法(2019.2.19 / 2019-02-19 / 2019年2月19日),避免把金额
+    当日期;用户若只写"9.18"仍会由字段日期补全。
+    """
+    return bool(_DATE_RE.search(sanitize_title(text)))
+
+
+def contains_name(text: str | None, name: str | None) -> bool:
+    """文本里是否已含某个人名。"""
+    clean_name = sanitize_title(name)
+    return bool(clean_name) and clean_name in sanitize_title(text)
+
+
+def _insert_after_date(text: str, name: str) -> str:
+    """把人物插到文本里第一个日期之后,保持"日期 人物 事件"的读法。"""
+    match = _DATE_RE.search(text)
+    if not match:
+        return f"{name} {text}".strip()
+    head = text[: match.end()]
+    tail = text[match.end():].lstrip()
+    return f"{head} {name} {tail}".strip()
+
+
 def build_report_title(
     applicant: str | None = None,
     expense_type: str | None = None,
@@ -123,12 +148,25 @@ def build_report_title(
     event: str | None = None,
     task_id: str | None = None,
 ) -> str:
-    """按"日期区间 人物 事件"拼装报销单名称(缺失段自动省略)。"""
-    parts = [
-        format_date_range(start_date, end_date),
-        str(applicant).strip() if applicant else "",
-        event_label(expense_type, event),
-    ]
+    """按"日期区间 人物 事件"拼装报销单名称(缺失段自动省略)。
+
+    去重规则:用户写在备注/事由里的内容优先 ——
+    - 备注里已经写了日期,就以备注为准,不再自动拼日期;
+    - 备注里已经写了这个人名,就不再自动拼人名;
+    - 备注自带日期但没写人名时,把人物补在日期之后,而不是另起一段,
+      避免出现"2026.5.10-5.12 张三 2019.2.19 张三 住宿报销"这类重复拼接。
+    """
+    event_text = event_label(expense_type, event)
+    if has_date(event_text):
+        if applicant and not contains_name(event_text, applicant):
+            event_text = _insert_after_date(event_text, str(applicant).strip())
+        parts = [event_text]
+    else:
+        parts = [
+            format_date_range(start_date, end_date),
+            "" if contains_name(event_text, applicant) else (str(applicant).strip() if applicant else ""),
+            event_text,
+        ]
     title = sanitize_title(" ".join(part for part in parts if part))
     return title or sanitize_title(task_id)
 

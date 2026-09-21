@@ -248,12 +248,19 @@ class EndToEndReviewTests(unittest.TestCase):
         risk_types = {r.risk_type for r in report.risks}
         self.assertIn("OCR_QUALITY_REVIEW", risk_types)
 
-    def test_garbled_ocr_text_raises_quality_risk(self):
-        """OCR 识别失败(乱码文本)-> OCR_QUALITY_REVIEW 人工复核。"""
+    def test_garbled_ocr_text_is_undetermined(self):
+        """OCR 只吐出乱码(有效文本不足)→ 材料不可读,结论为"无法判定"。
+
+        以前这里会给一条 OCR_QUALITY_REVIEW 风险,等于用乱码编出结论;现在改为
+        明确"无法判定",避免误导。
+        """
         engine = FakeEngine("WETS: 张三")
         with patch("app.parsers.loader.get_ocr_engine", return_value=engine):
             report = run_audit([("scan.jpg", make_text_image("付款金额：560.00"))])
-        self.assertIn("OCR_QUALITY_REVIEW", {r.risk_type for r in report.risks})
+        self.assertEqual(report.status, "UNDETERMINED")
+        self.assertIn("MATERIAL_UNREADABLE", {r.risk_type for r in report.risks})
+        self.assertEqual(report.fields, {})
+        self.assertIsNotNone(report.failure_reason)
 
     def test_normal_image_no_extra_risk(self):
         engine = FakeEngine("发票金额：520.00元 开票日期：2026-05-12 申请人：张三 出差城市：杭州")

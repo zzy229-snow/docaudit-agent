@@ -16,12 +16,14 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 发票查重（FR-204）用例依赖登记历史，运行时会自动把 `INVOICE_REGISTRY_PATH` 指向临时文件，保证每次运行都从干净历史开始、结论可复现。
 
+评测语料是**合成文本**（含图片素材的用例也用合成 OCR 文本），因此跑评测时会临时把 `OCR_ENGINE` 设为 `stub`（等价 mock 文本，但按"已识别"对待），避免材料可读性判定把所有图片用例判成"无法判定"；若你已显式配置真实引擎（`tesseract`/`http`/`mineru`/`auto`），评测会沿用你的配置不被覆盖。**评测结果只反映主流程逻辑，不代表真实 OCR 识别能力。**
+
 ## 指标
 
 总览（用例是否完全通过）：
 
 - `pass_rate`：整条用例是否完全通过（状态 + 风险集合 + 字段 + 制度引用全部一致）。
-- `status_accuracy`：最终状态是否符合预期（`PASS` / `REVIEW_REQUIRED`）。
+- `status_accuracy`：最终状态是否符合预期（`PASS` / `REVIEW_REQUIRED` / `UNDETERMINED`）。
 - `risk_accuracy`：风险码集合是否完全一致。
 - `field_accuracy`：关键字段值是否符合预期（含发票号码、金额、城市、日期等）。
 - `policy_ref_accuracy`：制度证据引用是否符合预期（如 `TRAVEL-V1-4.2-A`）。

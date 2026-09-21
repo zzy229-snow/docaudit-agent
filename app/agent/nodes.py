@@ -15,6 +15,7 @@ from app.parsers.loader import parse_document
 from app.extraction.field_extractor import extract_fields_with_diagnostics
 from app.rag.retriever import retrieve_policy
 from app.services.injection_guard import detect_injection
+from app.services.readability import assess_readability, human_provided_fields
 from app.tools.registry import get_tool
 
 import os
@@ -329,23 +330,47 @@ def route_review(state: dict) -> dict:
 
 def report(state: dict) -> dict:
     started_at = start_node(state, "report", "开始生成审核报告")
-    summary = risk_summary(state["risks"])
     control = state["control"]
+    risks = list(state.get("risks") or [])
+    # 材料可读性:读不出来就不给结论(默认演示模式下图片/扫描件从未被识别)
+    verdict = assess_readability(state.get("documents") or [], state.get("fields") or {})
+    state.setdefault("trace", []).append(verdict.as_trace())
+    unreadable = not verdict.readable
+    human_review_items = list(state.get("human_review_items") or [])
+    fields = dict(state.get("fields") or {})
+    if unreadable:
+        # 仅保留与"是否识别"无关的材料齐全性判断,其余建立在演示文本上的风险全部作废
+        keep = [risk for risk in risks if risk.risk_type == "REQUIRED_DOCUMENTS"]
+        blocker = build_risk(
+            risk_type="MATERIAL_UNREADABLE",
+            reason=verdict.reason or "材料未被识别，无法作出审核结论。",
+            evidence_refs=verdict.unreadable_files,
+        )
+        risks = [blocker, *keep]
+        human_review_items = [_review_item_for(risk) for risk in risks if requires_review(risk.level)]
+        state["human_review_items"] = human_review_items
+        # 未识别文本里抽出来的字段不是证据,不展示(只留人工填写/修正的字段)
+        fields = human_provided_fields(fields)
+        state.setdefault("trace", []).append(
+            f"material_unreadable: {verdict.code} —— 已作废{len(state.get('risks') or [])}项基于未识别文本的风险")
+    summary = risk_summary(risks)
     if control.route == "fail":
         status, failure_reason = "FAILED", control.route_reason
+    elif unreadable:
+        status, failure_reason = "UNDETERMINED", verdict.reason
     else:
-        status, failure_reason = overall_status(state["risks"]), None
+        status, failure_reason = overall_status(risks), None
     value = AuditReport(status=status,
-        fields=state["fields"], policy_evidence=state["policy_evidence"],
-        checks=state["checks"], risks=state["risks"], risk_summary=summary,
+        fields=fields, policy_evidence=state["policy_evidence"],
+        checks=state["checks"], risks=risks, risk_summary=summary,
         audit_plan=state.get("audit_plan"), critique=state.get("critique"),
         failure_reason=failure_reason, trace=state["trace"] + [
             f"task_id={state['task_id']}",
             f"steps={state['control'].step_count}/{state['control'].max_steps}",
             f"tool_calls={len(state['tool_calls'])}",
-            f"human_review_items={len(state['human_review_items'])}",
+            f"human_review_items={len(human_review_items)}",
             f"risk_levels={','.join(f'{k}:{v}' for k, v in summary.items()) or 'none'}",
             f"route={control.route}",
         ])
     finish_node(state, "report", started_at, "生成审核报告")
-    return {"report": value, "trace": value.trace}
+    return {"report": value, "trace": value.trace, "human_review_items": human_review_items}

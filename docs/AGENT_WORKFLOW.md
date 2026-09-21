@@ -266,6 +266,22 @@ parse_documents → extract → retrieve → plan → check → critic
 因此 LangGraph 版与顺序版结论一致；`tests/test_langgraph_workflow.py` 逐用例比对两者
 的状态、风险集合、字段值与计划步骤。
 
+#### report 节点的材料可读性门控（`UNDETERMINED`）
+
+`report` 在算结论之前先做一次**材料可读性判定**（`app/services/readability.py`，纯函数）：
+
+| 判定 | 触发条件 | 结果 |
+| --- | --- | --- |
+| `MOCK_OCR` | 解析文本带演示引擎标记（`【OCR-MOCK】`），即材料从未被真正识别 | 状态 `UNDETERMINED` |
+| `NO_TEXT` | 全部材料有效文本不足 `MATERIAL_MIN_TEXT_CHARS`（默认 12 字） | 状态 `UNDETERMINED` |
+| `NO_FIELDS` | 有文本但一个字段都没抽到（无证据即无结论，§16） | 状态 `UNDETERMINED` |
+
+命中时：风险集合被重写为一条 `MATERIAL_UNREADABLE`（HIGH，理由里写明改哪个环境变量）
++ 仍成立的 `REQUIRED_DOCUMENTS`（材料齐全性与识别无关），其余建立在未识别文本上的风险
+全部作废；`fields` 只保留人工填写/修正过的字段；`failure_reason` 给出可操作的原因与改法。
+这样"读不出来"不会伪装成有效结论 —— 判定依据是**解析结果本身**（文本标记/长度/字段数），
+不是配置项，所以既不会误伤真引擎，也不会被"配了个假引擎"绕过。
+
 ### 12.2 引擎切换
 
 | 环境变量 | 行为 |
