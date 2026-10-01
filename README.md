@@ -100,6 +100,13 @@ python -m unittest discover -s tests -v
 导入前显式钉住 `OCR_ENGINE=mock`。评测同理，默认强制 `OCR_ENGINE=stub` 合成语料引擎
 （想用真引擎跑评测设 `EVAL_OCR_ENGINE=baidu`）。
 
+测试**不碰生产数据**：任务库、发票查重登记表、已发布制度库在单测进程里全部指向临时目录
+（闸门在 `app/api/store.py` 的 `_default_db_path()`，与"单测不读 `.env`"同一口径）。
+为什么闸门必须装在应用侧：`unittest discover -s tests` 把测试模块当**顶层模块**导入
+（`test_xxx` 而不是 `tests.test_xxx`），`tests/__init__.py` 不会先执行 —— 只在包初始化里设
+环境变量是无效的。没这道闸门时，**一轮单测会往生产任务库写 28 条演示报销单**，
+工作台任务列表里会凭空多出"张三/alice 住宿报销"。`tests/test_runtime_isolation.py` 锁住了这条规则。
+
 ## 评测基线
 
 ```bash
