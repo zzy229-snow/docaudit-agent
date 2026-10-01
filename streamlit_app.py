@@ -9,6 +9,8 @@ from app.api.store import AuditTask, task_store
 from app.config import load_environment
 from app.evaluation.runner import run_evaluation
 from app.services.audit_summary import AuditExplanationSummary, build_audit_summary
+from app.services.model_gateway import ModelGateway
+from app.services.model_smoke import run_smoke_check
 from app.services.report_exporter import build_html_report
 from app.services.task_naming import build_report_title, safe_file_name
 from app.services.readability import demo_mode_notice, is_synthetic_engine
@@ -94,10 +96,98 @@ def load_demo_files(case: str) -> list[tuple[str, bytes]]:
 
 
 def provider_label() -> str:
+    """侧栏指标用的模型来源(短):详情在下面 caption 里,避免 st.metric 省略号截断。"""
+    if runtime_llm_settings().get("model"):
+        return "页面填写"
     provider = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
     if provider == "mock":
         return "Mock / 离线安全模式"
     return f"{provider} · {os.getenv('MODEL_NAME', '未设置模型名')}"
+
+
+# ---------------- 模型 API 填空 ----------------
+#: 上线交付时客户拿到的应该是"填空",不是我们内置的 key。
+LLM_PRESETS: dict[str, tuple[str, str]] = {
+    "使用系统内置配置（.env）": ("", ""),
+    "DeepSeek 官方": ("https://api.deepseek.com/v1", "deepseek-chat"),
+    "OpenAI 兼容（自定义地址）": ("", ""),
+}
+
+
+def runtime_llm_settings() -> dict:
+    """当前会话的模型配置(空 dict = 用 .env 内置)。
+
+    只活在浏览器会话里:不落盘、不改进程环境变量 —— 进程级环境变量在多用户下会互相覆盖。
+    """
+    return dict(st.session_state.get("llm_settings") or {})
+
+
+def render_llm_settings() -> None:
+    settings = runtime_llm_settings()
+    with st.expander("模型 API 设置（填空）", expanded=False):
+        st.caption(
+            "交付给客户时不留内置密钥：客户在这里填自己的 API Key 即可。"
+            "只作用于当前浏览器会话，不写入磁盘。（接口 `/api/v1` 仍读服务端 `.env`）"
+        )
+        names = list(LLM_PRESETS)
+        preset = st.selectbox("供应商", names)
+        base_default, model_default = LLM_PRESETS[preset]
+        # Streamlit 的 widget state 会压住 value=,所以切换供应商时要显式把输入框重置成该供应商的默认值
+        if st.session_state.get("llm_preset_applied") != preset:
+            st.session_state["llm_base_input"] = base_default
+            st.session_state["llm_model_input"] = model_default
+            st.session_state["llm_preset_applied"] = preset
+        st.session_state.setdefault("llm_base_input", base_default)
+        st.session_state.setdefault("llm_model_input", model_default)
+        st.session_state.setdefault("llm_key_input", settings.get("api_key", ""))
+        base_url = st.text_input(
+            "接口地址", key="llm_base_input", placeholder="https://api.deepseek.com/v1",
+        )
+        api_key = st.text_input(
+            "API Key", key="llm_key_input", type="password", placeholder="sk-…",
+        )
+        model = st.text_input("模型名", key="llm_model_input", placeholder="deepseek-chat")
+
+        use_builtin = preset == names[0]
+        candidate = {} if use_builtin else {
+            "provider": "openai-compatible",
+            "base_url": base_url.strip(),
+            "api_key": api_key.strip(),
+            "model": model.strip(),
+        }
+        incomplete = not use_builtin and not all(candidate.values())
+
+        left, right = st.columns(2)
+        if left.button("测试连接", use_container_width=True):
+            if use_builtin:
+                st.info("当前选择的是系统内置配置，未填写任何 key。")
+            elif incomplete:
+                st.error("接口地址、API Key、模型名三项都要填。")
+            else:
+                with st.spinner("正在调用模型…"):
+                    try:
+                        result = run_smoke_check(ModelGateway(**candidate))
+                        st.success(f"连接正常：{result.get('message')}")
+                    except Exception as exc:  # 鉴权/网络失败要让填的人直接看到原因
+                        st.error(f"连接失败：{exc}")
+        if right.button("保存到本次会话", type="primary", use_container_width=True):
+            if use_builtin:
+                st.session_state["llm_settings"] = {}
+                st.success("已回退到系统内置配置。")
+            elif incomplete:
+                st.error("接口地址、API Key、模型名三项都要填。")
+            else:
+                st.session_state["llm_settings"] = candidate
+                st.success(f"已生效：{candidate['model']}（仅本次会话）")
+
+        effective = runtime_llm_settings()   # 按钮刚保存过,要读最新值,否则脚注和上面的提示自相矛盾
+        if effective:
+            st.caption(
+                f"当前会话使用**页面填写**的配置：`{effective.get('model')}`"
+                f"（key {len(effective.get('api_key', ''))} 位，不回显）"
+            )
+        else:
+            st.caption("当前使用服务端内置配置（`.env`）。")
 
 
 def status_label(status: str) -> str:
@@ -205,6 +295,7 @@ def run_selected_task(task: AuditTask) -> AuditTask:
         [(item.file_name, item.content) for item in task.files],
         field_overrides=task_store.field_overrides(task.task_id),
         task_id=task.task_id,
+        llm_settings=runtime_llm_settings(),   # 侧栏"填空"填的模型配置优先于 .env
     )
     return task_store.save_report(task.task_id, report)
 
@@ -451,7 +542,10 @@ if "nav_gen" not in st.session_state:
 
 with st.sidebar:
     st.header("系统运行状态")
+    render_llm_settings()
     st.metric("模型模式", provider_label())
+    if runtime_llm_settings().get("model"):
+        st.caption(f"模型：{runtime_llm_settings()['model']}（本次会话）")
     st.metric("OCR模式", os.getenv("OCR_ENGINE", "mock"))
     st.metric("RAG模式", os.getenv("RAG_MODE", "mock"))
     st.metric("任务存储", os.getenv("AUDIT_TASK_STORE", "sqlite"))

@@ -38,6 +38,7 @@ python -m uvicorn app.api.main:app --reload --port 8102
 - 六项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性、重复发票查重。
 - 材料可读性判定：材料没被真正识别（演示引擎文本、解析为空、抽不到任何字段）时**不给结论**，任务状态为 `UNDETERMINED`（无法判定），只保留一条 `MATERIAL_UNREADABLE` 风险并说明改法 —— 避免"上传 A 发票、结论却是 B 发票"的误导。结论状态：`PASS` / `REVIEW_REQUIRED` / `UNDETERMINED` / `FAILED`。
 - **本地离线识别（`OCR_ENGINE=mineru`）**：复用本机 MinerU（免费、离线，发票不出内网），实测同一张测试票识别质量与云端发票接口口径一致（代码/号码/日期/价税合计/购买方），常驻服务下单张 18~28 秒（不起常驻则约 115 秒）；引擎内置输出归一化（表格逐格换行、去标签、还 HTML 实体）并修掉签章栏误抽主体、日期未规范化、购买方抽不到三个真实票面问题。参见 `docs/OCR_INTEGRATION.md` §4.2。
+- **模型 API 界面填空**：交付时不留内置密钥 —— 侧栏「模型 API 设置（填空）」选供应商、填客户自己的 API Key，`测试连接` 当场验证（失败原样回显模型返回原因），`保存到本次会话` 立即生效；配置只存浏览器会话（不落盘、不改 `.env`），且只影响工作台进程（`/api/v1` 仍读服务端 `.env`）。实现走 `run_audit(..., llm_settings=...)` 参数而非进程环境变量。参见 `docs/MODEL_GATEWAY.md` §5。
 - 发票 OCR 接入：`OCR_ENGINE=http` 支持两种接口形态 —— 返回整段文本（`OCR_HTTP_TEXT_PATH`）或**直接返回结构化字段**（`OCR_HTTP_FIELDS_PATH` + `OCR_HTTP_FIELD_MAP`，发票专用接口推荐），结构化字段优先级高于版式正则、冲突写进 trace；百度智能云增值税发票识别内置为 `OCR_ENGINE=baidu`（token 自动换发/缓存/失效重试）；`scripts/check_ocr_http.py` 可一条命令验证接口（详见 `docs/OCR_INTEGRATION.md`）。
 - 材料类型按票面内容判定：发票/付款凭证/审批单靠票面信号识别（发票号码、价税合计、付款金额、流水号、审批意见…），文件名只在内容判不出时兜底 —— 上传「微信图片_2026.png」也不会被算成缺少发票。
 - 风险等级口径：`AMOUNT_MATCH`（金额不一致，HIGH）与 `AMOUNT_UNVERIFIABLE`（金额字段缺失、无法核对，MEDIUM）分开，缺字段不再被算成"金额不符"。

@@ -61,10 +61,12 @@ def prepare_state(
     timeout_seconds: float | None = None,
     department: str | None = None,
     as_of: str | None = None,
+    llm_settings: dict | None = None,
 ) -> dict:
     """构造初始审核状态(§7.3 AuditState)。
 
     ``department``/``as_of`` 进入 ``user_context``,供制度检索做部门与生效区间过滤(FR-304)。
+    ``llm_settings`` 是运行时模型配置(来自界面"填空"或调用方),优先于环境变量。
     """
     from time import perf_counter
 
@@ -81,6 +83,7 @@ def prepare_state(
         "tool_calls": [],
         "human_review_items": [],
         "field_overrides": field_overrides or {},
+        "llm_settings": dict(llm_settings or {}),
         "control": AgentControl(**control_kwargs),
         "started_at": perf_counter(),
         "user_context": {"department": department, "as_of": as_of},

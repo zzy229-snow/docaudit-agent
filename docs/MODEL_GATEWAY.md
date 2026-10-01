@@ -93,7 +93,27 @@ app/prompts/field_extraction_v1.txt
 
 更完整的稳定性说明见 `docs/LLM_ROBUSTNESS.md`。
 
-## 5. 测试
+## 5. 界面"填空"接入（上线交付用）
+
+客户上线时不该拿到我们的内置 key，所以工作台侧栏提供 **模型 API 设置（填空）**：
+选供应商（DeepSeek 官方 / OpenAI 兼容）→ 接口地址与模型名自动带出 → 只填客户的 API Key
+→「测试连接」当场验证（失败会把模型返回的原因原样显示）→「保存到本次会话」。
+
+实现要点：
+
+| 关注点 | 做法 | 为什么 |
+| --- | --- | --- |
+| 配置怎么进审核链路 | `run_audit(..., llm_settings={...})` → `state["llm_settings"]` → extract 节点 `ModelGateway(**settings)` | 走**参数**而不是写进程环境变量；环境变量在多用户并发下会互相覆盖 |
+| 优先级 | 页面填写 > 环境变量(`.env`) | 不填就完全保持原有行为（向后兼容） |
+| 存哪里 | 只存浏览器会话的 `st.session_state` | 不落盘、不进日志、不改 `.env` |
+| 作用范围 | 只影响工作台（Streamlit）进程 | 接口 `/api/v1` 仍读服务端 `.env`，由运维配置 |
+| 回显 | 只显示 key 位数（如"key 23 位，不回显"） | 避免截图/投屏泄露 |
+| 切换供应商 | 显式重置输入框（Streamlit 的 widget state 会压住 `value=`） | 否则改了供应商但地址还停在上一个 |
+
+已知边界（后续要做完整版时）：配置是**会话级**的，刷新页面/换浏览器要重填；若要多人共用一套，
+需要服务端加密存储（DPAPI 或对称密钥）+ RBAC + 掩码回显 + 审计事件 + `/api/v1/settings/*`。
+
+## 6. 测试
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest tests.test_model_gateway tests.test_llm_field_extractor -v

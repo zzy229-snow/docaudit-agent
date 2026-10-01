@@ -5,6 +5,7 @@ from app.models.document import Document
 from app.models.field import ExtractedField
 from app.extraction.llm_field_extractor import LlmExtractionDiagnostics, extract_fields_with_llm_diagnostics
 from app.parsers.ocr import normalize_ocr_value
+from app.services.model_gateway import ModelGateway
 
 
 #: 发票/凭证底部签章栏的标签。实测(MinerU 输出)这一行形如
@@ -50,9 +51,9 @@ class FieldExtractionOutcome(BaseModel):
     llm_diagnostics: LlmExtractionDiagnostics | None = None
 
 
-def extract_fields(documents: list[Document]) -> dict[str, ExtractedField]:
-    return extract_fields_with_diagnostics(documents).fields
-
+def extract_fields(documents: list[Document],
+                   gateway: ModelGateway | None = None) -> dict[str, ExtractedField]:
+    return extract_fields_with_diagnostics(documents, gateway=gateway).fields
 
 def _line_around(text: str, start: int, end: int) -> str:
     """取出匹配所在的整行(用于判断它是不是签章栏)。"""
@@ -82,12 +83,15 @@ def _normalize_value(name: str, value: str) -> str:
     return value
 
 
-def extract_fields_with_diagnostics(documents: list[Document]) -> FieldExtractionOutcome:
+def extract_fields_with_diagnostics(documents: list[Document],
+                                    gateway: ModelGateway | None = None) -> FieldExtractionOutcome:
     """Deterministic baseline; values are only taken from explicit labels.
 
     ``LABELS`` 的值可以是单个正则,也可以是正则元组 —— 元组按顺序尝试,先命中的那个为准
     (用于"同一标签在真实版面上有多种写法"的情况,例如价税合计的同行/跨行写法)。
     命中的值还要过 :func:`_accepts`(排除签章栏)与 :func:`_normalize_value`(日期规范化)。
+
+    ``gateway`` 由上层按"运行时模型配置"构造(界面填空/API 传入),不传则回退环境变量。
     """
     found: dict[str, ExtractedField] = {}
     for doc in documents:
@@ -111,7 +115,7 @@ def extract_fields_with_diagnostics(documents: list[Document]) -> FieldExtractio
                         source_text=match.group(0),
                     )
                     break
-    llm_outcome = extract_fields_with_llm_diagnostics(documents)
+    llm_outcome = extract_fields_with_llm_diagnostics(documents, gateway=gateway)
     for name, field in llm_outcome.fields.items():
         found.setdefault(name, field)
     return FieldExtractionOutcome(fields=found, llm_diagnostics=llm_outcome.diagnostics)

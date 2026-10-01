@@ -153,6 +153,8 @@ class AuditState(TypedDict, total=False):
     injection_hits: list[dict]
     #: 发票专用 OCR 接口返回的结构化字段(项目字段名 → 规范化值),优先于正则抽取
     ocr_fields: dict[str, str]
+    #: 运行时模型配置(界面"填空"/API 传入的 provider/base_url/model/api_key),优先于环境变量
+    llm_settings: dict
     # §7.2:受控审核计划与自检结果
     audit_plan: Any
     critique: Any

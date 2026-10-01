@@ -33,16 +33,19 @@ def run_audit(
     task_id: str | None = None,
     department: str | None = None,
     as_of: str | None = None,
+    llm_settings: dict | None = None,
 ) -> AuditReport:
     """执行一次完整审核。
 
     ``task_id`` 可传入稳定标识(如 API 任务 ID);不传则生成随机 ID。修正后重跑
     必须复用同一 task_id,否则会被重复发票查重误判为另一个任务(FR-204)。
     ``department``/``as_of`` 用于制度版本与部门过滤(FR-304)。
+    ``llm_settings`` 是**运行时模型配置**(provider/base_url/model/api_key),来自界面
+    "填空"或调用方;不传则用环境变量(向后兼容)。
     """
     state = pipeline.prepare_state(
         files, max_steps=max_steps, field_overrides=field_overrides, task_id=task_id,
-        department=department, as_of=as_of,
+        department=department, as_of=as_of, llm_settings=llm_settings,
     )
     engine = resolve_engine()
     if engine == "langgraph":

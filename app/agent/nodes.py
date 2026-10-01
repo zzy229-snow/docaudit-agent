@@ -16,6 +16,7 @@ from app.extraction.field_extractor import extract_fields_with_diagnostics
 from app.rag.retriever import retrieve_policy
 from app.services.injection_guard import detect_injection
 from app.services.material_type import MATERIAL_LABELS, classify_documents, material_check_inputs
+from app.services.model_gateway import ModelGateway
 from app.services.readability import assess_readability, human_provided_fields
 from app.tools.registry import get_tool
 
@@ -81,7 +82,9 @@ def parse_documents(state: dict) -> dict:
 
 def extract(state: dict) -> dict:
     started_at = start_node(state, "extract", "开始抽取统一字段")
-    outcome = extract_fields_with_diagnostics(state["documents"])
+    # 运行时模型配置(界面"填空"或 API 传入)优先于环境变量
+    gateway = ModelGateway(**(state.get("llm_settings") or {}))
+    outcome = extract_fields_with_diagnostics(state["documents"], gateway=gateway)
     fields = outcome.fields
     if outcome.llm_diagnostics:
         diag = outcome.llm_diagnostics
