@@ -4,12 +4,13 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import sqlite3
+import tempfile
 from threading import RLock
 from typing import Literal
 from uuid import uuid4
 
 from app.models.audit import AuditReport, RiskItem
-from app.config import repo_root
+from app.config import repo_root, under_test_runner
 from app.services.task_naming import build_report_title, sanitize_title, title_from_fields
 
 
@@ -593,10 +594,25 @@ def _load_dt(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+_UNITTEST_DB_PATH: Path | None = None
+
+
+def _unittest_db_path() -> Path:
+    """单测进程专用的任务库路径:每进程一个临时目录,进程内固定(不能每次调用都换)。"""
+    global _UNITTEST_DB_PATH
+    if _UNITTEST_DB_PATH is None:
+        _UNITTEST_DB_PATH = Path(tempfile.mkdtemp(prefix="docaudit_unittest_")) / "audit_tasks.sqlite3"
+    return _UNITTEST_DB_PATH
+
+
 def _default_db_path() -> Path:
     configured = os.getenv("AUDIT_TASK_DB")
     if configured:
         return Path(configured)
+    if under_test_runner():
+        # 闸门:单测不落生产库。没它时 `unittest discover` 会因导入顺序绕过 tests/__init__
+        # 的隔离(测试模块是顶层导入的),每轮测试都往工作台塞演示报销单。
+        return _unittest_db_path()
     return repo_root() / "data" / "runtime" / "audit_tasks.sqlite3"
 
 
