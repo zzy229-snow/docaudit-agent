@@ -36,6 +36,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tempfile
 import time
@@ -411,20 +412,50 @@ class BaiduVatInvoiceOcrEngine(HttpOcrEngine):
 
 
 class MineruOcrEngine(OcrEngine):
-    """MinerU 引擎:子进程调用 mineru.exe,读取输出 markdown 为文本流。
+    """MinerU 引擎:子进程调用 mineru.exe,并把输出归一化成可抽取文本。
 
-    冷启动需要加载模型(CPU 数分钟),后续页复用进程;失败时上层降级(PRD §23.5)。
+    两个实测要点(2026-10-01,CPU、单张发票):
+
+    1. **速度**:不指定 ``--api-url`` 时,mineru CLI 每次调用都会自起一个临时服务并
+       **重新加载模型**,单张图约 115 秒。要提速应先起常驻服务
+       ``mineru-api --host 127.0.0.1 --port 8321``,再设 ``MINERU_API_URL`` 指过去,
+       模型只加载一次,后续每张只剩推理时间。
+    2. **输出形态**:MinerU 产出 Markdown + HTML 表格,标签会打断"标签—值"的相邻关系
+       (例如 ``价税合计(大写)</td><td ...>玖佰元整 (小写)¥900.00``),直接喂给规则抽取器
+       会漏抽。因此这里统一走 :func:`normalize_mineru_text`:表格逐格换行、去标签、
+       还原 HTML 实体。
     """
 
     name = "mineru"
 
-    def __init__(self, exe: str, cache_dir: str, model_source: str = "modelscope") -> None:
+    def __init__(self, exe: str, cache_dir: str, model_source: str = "modelscope",
+                 backend: str = "pipeline", api_url: str = "") -> None:
         self.exe = Path(exe)
         self.cache_dir = Path(cache_dir)
         self.model_source = model_source
+        self.backend = backend
+        #: 常驻 mineru-api 地址(为空则每次自起临时服务,很慢)
+        self.api_url = api_url
 
     def available(self) -> bool:
         return self.exe.exists()
+
+    def resolved_api_url(self) -> str:
+        """常驻服务不可达时返回空串(不传 ``--api-url``)。
+
+        为什么要判断:``--api-url`` 指向一个没起来的服务会让 CLI 直接失败、审核变 FAILED;
+        而退回"不传"只是慢(CLI 自起临时服务),仍能出结论。宁可慢,不可挂。
+        """
+        if not self.api_url:
+            return ""
+        parsed = urllib.parse.urlparse(self.api_url)
+        host = parsed.hostname or "127.0.0.1"
+        port = parsed.port or 80
+        try:
+            with socket.create_connection((host, port), timeout=1.0):
+                return self.api_url
+        except OSError:
+            return ""
 
     def recognize(self, content: bytes) -> str:
         if not self.exe.exists():
@@ -438,9 +469,12 @@ class MineruOcrEngine(OcrEngine):
             env = os.environ.copy()
             env["MINERU_MODEL_SOURCE"] = self.model_source
             env["MODELSCOPE_CACHE"] = str(self.cache_dir)
+            command = [str(self.exe), "-p", str(source), "-o", str(out_dir), "-b", self.backend]
+            api_url = self.resolved_api_url()
+            if api_url:
+                command += ["--api-url", api_url]
             proc = subprocess.run(
-                [str(self.exe), "-p", str(source), "-o", str(out_dir), "-b", "pipeline"],
-                capture_output=True, text=True, timeout=3600,
+                command, capture_output=True, text=True, timeout=3600,
                 stdin=subprocess.DEVNULL, env=env,
             )
             if proc.returncode != 0:
@@ -448,7 +482,7 @@ class MineruOcrEngine(OcrEngine):
             md_files = sorted(out_dir.rglob("*.md"))
             if not md_files:
                 raise RuntimeError("MinerU 未产出 markdown 输出")
-            return md_files[0].read_text(encoding="utf-8")
+            return normalize_mineru_text(md_files[0].read_text(encoding="utf-8"))
 
 
 class RoutingOcrEngine(OcrEngine):
@@ -548,7 +582,13 @@ def _build_mineru_engine() -> MineruOcrEngine:
         "MODELSCOPE_CACHE",
         os.environ.get("MINERU_MODELS", r"<MinerU 环境>\models"),
     )
-    return MineruOcrEngine(exe=exe, cache_dir=cache)
+    return MineruOcrEngine(
+        exe=exe,
+        cache_dir=cache,
+        backend=os.environ.get("MINERU_BACKEND", "pipeline"),
+        # 常驻 mineru-api 地址:设了才复用已加载的模型(否则每次自起临时服务,约 100 秒/张)
+        api_url=os.environ.get("MINERU_API_URL", "").strip(),
+    )
 
 
 def _get_by_path(data: dict, path: str):
@@ -558,6 +598,45 @@ def _get_by_path(data: dict, path: str):
             return None
         current = current[part]
     return current
+
+
+# ---------------- MinerU 输出归一化 ----------------
+
+_MD_IMAGE_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_MARKDOWN_HEADING_RE = re.compile(r"^\s*#{1,6}\s*")
+_HTML_ENTITIES: tuple[tuple[str, str], ...] = (
+    ("&lt;", "<"), ("&gt;", ">"), ("&quot;", '"'), ("&#39;", "'"),
+    ("&nbsp;", " "), ("&amp;", "&"),      # &amp; 放最后,避免二次解码
+)
+
+
+def normalize_mineru_text(markdown: str) -> str:
+    """MinerU 的 Markdown/HTML 输出 → 规则抽取器能读的纯文本。
+
+    为什么必须做:实测 MinerU 把这行票面内容输出成
+    ``价税合计(大写)</td><td rowspan=1 colspan=9>玖佰元整 (小写)¥900.00</td>``,
+    标签(还含数字 ``colspan=9``)会把"标签—值"切断,导致金额抽不出来。归一化后
+    每个单元格各占一行,标签与值重新相邻。
+
+    处理:丢图片占位 → 表格单元格/行切行 → 去标签 → 还原 HTML 实体(发票密码区
+    全是 ``&lt;`` ``&gt;``)→ 去掉 Markdown 标题符号 → 逐行折叠空白、丢空行。
+    """
+    if not markdown:
+        return ""
+    text = _MD_IMAGE_RE.sub(" ", markdown)
+    text = re.sub(r"</t[dh]\s*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"</tr\s*>", "\n", text, flags=re.IGNORECASE)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
+    text = _HTML_TAG_RE.sub(" ", text)
+    for entity, char in _HTML_ENTITIES:
+        text = text.replace(entity, char)
+    lines = []
+    for line in text.splitlines():
+        cleaned = " ".join(_MARKDOWN_HEADING_RE.sub("", line).split())
+        if cleaned:
+            lines.append(cleaned)
+    return "\n".join(lines)
 
 
 # ---------------- 结构化字段(发票专用 OCR 接口) ----------------
