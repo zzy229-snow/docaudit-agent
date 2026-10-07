@@ -9,9 +9,9 @@ import unittest
 os.environ["OCR_ENGINE"] = "mock"
 os.environ["MODEL_PROVIDER"] = "mock"
 from io import BytesIO
+from pathlib import Path
 from unittest.mock import patch
 
-import fitz
 from PIL import Image
 
 from app.parsers.loader import parse_document
@@ -29,13 +29,13 @@ def make_scanned_pdf() -> bytes:
 
 
 def make_electronic_pdf() -> bytes:
-    """带文本层的电子 PDF。"""
-    doc = fitz.open()
-    page = doc.new_page()
-    page.insert_text((72, 72), "发票金额：1280.00元\n开票日期：2026-05-12\n发票号码：INV-E-001")
-    data = doc.tobytes()
-    doc.close()
-    return data
+    """带文本层的电子 PDF。
+
+    读静态 fixture 而不是运行时生成:生成 PDF 需要第三方库(PyMuPDF 是 AGPL、
+    reportlab 是额外依赖),而本项目按 Apache-2.0 发布,只留读取用的 pypdf。
+    fixture 内容:发票金额：1280.00元 / 开票日期：2026-05-12 / 发票号码：INV-E-001
+    """
+    return (Path(__file__).resolve().parent / "fixtures" / "electronic_invoice.pdf").read_bytes()
 
 
 def make_image() -> bytes:
