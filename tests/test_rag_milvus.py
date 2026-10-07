@@ -1,7 +1,7 @@
 """Milvus 向量检索集成测试(PRD §9.3 混合召回/§13.2 Recall@K)。
 
 仅在具备 bge-m3 编码环境且已建立索引时运行(否则 skip):先执行
-    <RAG 环境>/python.exe -m app.rag.build_index
+    <RAG环境>/python -m app.rag.build_index
 再以同一环境运行本测试。
 """
 

@@ -33,7 +33,7 @@ from app.parsers.ocr import (
 )
 from app.services.invoice_registry import isolate_registry
 
-#: 这张"发票"接口返回的字段(用 2019 年那张测试票的值,便于对照)
+#: 这张"发票"接口返回的字段(虚构样例值,带分隔符用于验证规范化)
 INVOICE_FIELDS = {
     "InvoiceNum": "1234 5678",
     "InvoiceDate": "2019年02月19日",

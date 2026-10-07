@@ -15,3 +15,6 @@ data/runtime/
 
 # IDE
 .idea/
+
+# 第三方模型/语言包不随仓库分发(体积大,README 说明获取方式)
+data/ocr_models/

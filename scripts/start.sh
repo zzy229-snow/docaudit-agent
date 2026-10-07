@@ -3,7 +3,7 @@
 #
 # 用法:
 #   bash scripts/start.sh            # 创建/复用 .venv,安装依赖,启动 API + 工作台
-#   API_PORT=8101 WEB_PORT=8501 bash scripts/start.sh    # 协作者 自定义端口
+#   API_PORT=8101 WEB_PORT=8501 bash scripts/start.sh    # 自定义端口(多人并行开发)
 #
 # 日志:logs/api.log、logs/web.log;停止:bash scripts/stop.sh
 set -euo pipefail

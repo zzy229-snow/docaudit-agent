@@ -8,7 +8,7 @@
 
 当前阶段制度来自 data/policies/*.json(协作基线格式:chunk_id/section/content,
 任务⑥扩充为多费用类型制度,如 EXPENSE/MEDICAL/PURCHASE)。
-字段契约:检索器输出仍映射为 app.models.audit.PolicyEvidence(协作者基线字段,
+字段契约:检索器输出仍映射为 app.models.audit.PolicyEvidence(既有契约字段,
 不新增契约字段;policy_id/version/department 等只存 Milvus metadata 内部使用)。
 """
 

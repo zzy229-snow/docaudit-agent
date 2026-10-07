@@ -1,27 +1,35 @@
 # DocAudit Agent
 
-企业报销材料审核项目的稳定演示版。上传电子PDF、TXT、DOCX、XLSX、图片材料，系统会解析文本或走 OCR 路由，提取明确标注的字段，检索演示制度并运行五项确定性检查。默认不需要GPU或模型API；生产化演示应将 OCR、LLM 和 RAG 从 mock 模式切到真实服务。
+企业报销材料的**可解释审核 Agent**（演示级）：上传发票、付款凭证、审批单（PDF / TXT / DOCX / XLSX / 图片），系统解析或 OCR 后抽取字段，检索制度条款并运行六项确定性检查，输出可解释报告——每条风险都能追溯到字段证据与制度依据。
 
-当前稳定演示版适合演示、评审和本地联调；不应描述为生产级财务系统。
+默认全离线（`MODEL_PROVIDER=mock`、`OCR_ENGINE=mock`、`RAG_MODE=mock`），**不需要 GPU，也不需要任何 API Key**，克隆下来就能跑通完整流程与评测。
 
-## 运行环境
+> 定位：这是**可解释的演示基线**，不是能直接上线的财务系统。真实投产还需接真实 OCR/模型、外部数据库与权限体系等，见「当前限制」。
 
-- Python 3.11或3.12
-- Windows、macOS或Linux
+## 快速开始
+
+- Python 3.11 或 3.12
+- Windows、macOS 或 Linux
 
 ```bash
 python -m venv .venv
 # Windows PowerShell: .venv\Scripts\Activate.ps1
 # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
-streamlit run streamlit_app.py
+streamlit run streamlit_app.py          # 审核工作台 http://127.0.0.1:8500
+```
+
+跑一遍回归测试确认环境正常：
+
+```bash
+python -m unittest discover -s tests    # 338 例,全离线,约 30 秒
 ```
 
 一键启动（含依赖安装与就绪检查）：`bash scripts/start.sh`（Windows：`scripts\start.bat`），
 停止：`bash scripts/stop.sh`。Docker Compose 单机部署：`docker compose up -d --build`
 （API 8000 / 工作台 8500），详见 `docs/DEPLOYMENT.md`。
 
-打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元、发票购买方与申请人不一致和制度引用。文件名应包含 `invoice`、`payment`、`approval`，作为当前材料类型识别依据。请勿将真实敏感材料上传到公开部署页面。
+打开页面后，分别上传 `data/demo/normal/` 下的三份TXT，可得到 `PASS`；上传 `data/demo/over_limit/` 下的三份TXT，可得到住宿超标80元、发票购买方与申请人不一致和制度引用。材料类型按**票面内容**自动判定（文件名只在内容判不出时兜底），所以改成什么文件名都不会被算错类型。请勿将真实敏感材料上传到公开部署页面。
 
 Streamlit 页面已升级为审核工作台形态：左侧可创建 5 组虚构样例任务，主界面包含任务中心、新建审核、审核详情、风险看板、字段证据、人工复核、事件时间线、HTML 正式报告和 JSON 审核包下载。
 
@@ -37,7 +45,7 @@ python -m uvicorn app.api.main:app --reload --port 8102
 
 - 六项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性、重复发票查重。
 - 材料可读性判定：材料没被真正识别（演示引擎文本、解析为空、抽不到任何字段）时**不给结论**，任务状态为 `UNDETERMINED`（无法判定），只保留一条 `MATERIAL_UNREADABLE` 风险并说明改法 —— 避免"上传 A 发票、结论却是 B 发票"的误导。结论状态：`PASS` / `REVIEW_REQUIRED` / `UNDETERMINED` / `FAILED`。
-- **本地离线识别（`OCR_ENGINE=mineru`）**：复用本机 MinerU（免费、离线，发票不出内网），实测同一张测试票识别质量与云端发票接口口径一致（代码/号码/日期/价税合计/购买方），常驻服务下单张 18~28 秒（不起常驻则约 115 秒）；引擎内置输出归一化（表格逐格换行、去标签、还 HTML 实体）并修掉签章栏误抽主体、日期未规范化、购买方抽不到三个真实票面问题。参见 `docs/OCR_INTEGRATION.md` §4.2。
+- **本地离线识别（`OCR_ENGINE=mineru`）**：接本地 MinerU（免费、离线，发票不出内网），实测同一张测试票识别质量与云端发票接口口径一致（代码/号码/日期/价税合计/购买方），常驻服务下单张 18~28 秒（不起常驻则约 115 秒）；引擎内置输出归一化（表格逐格换行、去标签、还 HTML 实体）并修掉签章栏误抽主体、日期未规范化、购买方抽不到三个真实票面问题。参见 `docs/OCR_INTEGRATION.md` §4.2。
 - **模型 API 界面填空**：交付时不留内置密钥 —— 侧栏「模型 API 设置（填空）」选供应商、填客户自己的 API Key，`测试连接` 当场验证（失败原样回显模型返回原因），`保存到本次会话` 立即生效；配置只存浏览器会话（不落盘、不改 `.env`），且只影响工作台进程（`/api/v1` 仍读服务端 `.env`）。实现走 `run_audit(..., llm_settings=...)` 参数而非进程环境变量。参见 `docs/MODEL_GATEWAY.md` §5。
 - 发票 OCR 接入：`OCR_ENGINE=http` 支持两种接口形态 —— 返回整段文本（`OCR_HTTP_TEXT_PATH`）或**直接返回结构化字段**（`OCR_HTTP_FIELDS_PATH` + `OCR_HTTP_FIELD_MAP`，发票专用接口推荐），结构化字段优先级高于版式正则、冲突写进 trace；百度智能云增值税发票识别内置为 `OCR_ENGINE=baidu`（token 自动换发/缓存/失效重试）；`scripts/check_ocr_http.py` 可一条命令验证接口（详见 `docs/OCR_INTEGRATION.md`）。
 - 材料类型按票面内容判定：发票/付款凭证/审批单靠票面信号识别（发票号码、价税合计、付款金额、流水号、审批意见…），文件名只在内容判不出时兜底 —— 上传「微信图片_2026.png」也不会被算成缺少发票。
@@ -117,6 +125,19 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 评测用例位于 `data/evaluation/cases.json`，会端到端检查最终状态、风险码、关键字段和制度引用。后续接入真实OCR、LLM或向量检索后，先跑这组评测确认准确率和稳定性没有下降。详细说明见 `docs/EVALUATION.md`。
 
+## 中文 OCR 语言包（可选）
+
+仓库**不包含** Tesseract 语言包（`chi_sim.traineddata` 约 2.4MB、`eng.traineddata` 约 4MB，属第三方二进制）。只有在用 `OCR_ENGINE=tesseract` 时才需要，下载后放到 `data/ocr_models/tessdata/`：
+
+- `chi_sim.traineddata`：https://github.com/tesseract-ocr/tessdata_fast/raw/main/chi_sim.traineddata
+- `eng.traineddata`：https://github.com/tesseract-ocr/tessdata_fast/raw/main/eng.traineddata
+
+也可以用 `TESSERACT_DATA_DIR` 指向你本机已有的 tessdata 目录。真实 Tesseract 集成测试会在找不到语言包时自动跳过。
+
+## 术语说明
+
+文档与代码注释里的 `PRD §x.y`、`FR-xxx`、`AC-xx` 指项目内部需求文档的章节编号，该文档不随仓库分发；每条规则的具体口径以代码与 `docs/` 为准。为便于对照行业常见写法，仓库保留了这些编号。
+
 ## 目录
 
 `app/models` 是统一数据结构；`app/parsers` 解析文件；`app/extraction` 抽字段；`app/rag` 读取和匹配演示制度；`app/tools` 精确校验；`app/agent` 串联审核流程；`app/services` 预留模型API接口；`app/evaluation` 提供端到端评测；`data` 为虚构样例和预期结果。
@@ -129,6 +150,8 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 演示步骤见 `docs/DEMO_GUIDE.md`。合并到 `main` 前的检查清单见 `docs/RELEASE_CHECKLIST.md`。
 
-## 演示材料
+## 贡献与许可
 
-演示与说明文档见 `docs/DEMO_GUIDE.md`。
+- 贡献方式、开发约定与提交前检查见 `CONTRIBUTING.md`。
+- 许可证：**Apache-2.0**（见 `LICENSE`）。使用时请保留版权与许可声明。
+- 本项目只处理虚构/脱敏样例；请勿提交真实发票、真实税号、真实公司名或任何密钥。

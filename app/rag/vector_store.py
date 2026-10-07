@@ -2,10 +2,10 @@
 
 - 稠密向量(bge-m3 dense,1024 维)+ 稀疏向量(bge-m3 lexical)混合检索,RRF 融合;
 - 元数据:policy_id/version/department/expense_type/effective_from/to 用于过滤(§9.3 元数据过滤);
-- 检索结果映射回协作者契约 PolicyEvidence(chunk_id/section/content/score),不新增契约字段;
+- 检索结果映射回 PolicyEvidence 契约(chunk_id/section/content/score),不新增契约字段;
 - 编码依赖 FlagEmbedding+torch,不在主 requirements.txt,装 requirements-rag.txt 后启用。
 
-经验复用(来自 本地 RAG 项目/milvus_rag):
+实现说明:
 - Milvus Lite 文件库,每次连接后需 load_collection 才能检索;
 - JSON 字段不能建标量索引;2.6 无 num_entities,用 get_collection_stats;
 - 稀疏检索 metric_type=IP,稠密用 L2。

@@ -1,8 +1,8 @@
 """建立制度向量索引(PRD §9.1 索引流程)。
 
 运行环境:需要 bge-m3 编码能力(FlagEmbedding+torch,见 requirements-rag.txt)。
-推荐用已配置好的 RAG 环境 conda 环境:
-    <RAG 环境>/python.exe -m app.rag.build_index
+建议装在独立虚拟环境/conda 环境里(不要混进主环境),并设置 BGE_MODEL_DIR 指向 bge-m3 权重:
+    BGE_MODEL_DIR=<你的 bge-m3 目录> python -m app.rag.build_index
 
 用法:
     python -m app.rag.build_index            # 全量重建(清空后插入)
@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -21,7 +22,8 @@ from app.rag.vector_store import VectorStore
 
 POLICY_DIR = Path(__file__).resolve().parents[2] / "data" / "policies"
 MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "rag" / "bge-m3"
-DEFAULT_MODEL_DIR = Path(r"<bge-m3 目录>")
+#: bge-m3 权重目录:优先 BGE_MODEL_DIR,其次仓库内 data/rag/bge-m3(未下载时给出可操作提示)
+DEFAULT_MODEL_DIR = Path(os.environ["BGE_MODEL_DIR"]) if os.environ.get("BGE_MODEL_DIR") else MODEL_DIR
 
 
 def encode(model, chunks):
@@ -36,12 +38,17 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--append", action="store_true", help="增量插入,不清空现有索引")
     args = ap.parse_args()
-    import os
     os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
     from FlagEmbedding import BGEM3FlagModel
 
     model_path = DEFAULT_MODEL_DIR if DEFAULT_MODEL_DIR.exists() else MODEL_DIR
+    if not model_path.exists():
+        raise SystemExit(
+            f"找不到 bge-m3 权重目录:{model_path}\n"
+            "请用 BGE_MODEL_DIR 指向你本机的 bge-m3 目录,或把权重下载到 "
+            f"{MODEL_DIR}(见 docs/RAG_INTEGRATION.md)"
+        )
     print(f"[1/3] 加载 bge-m3: {model_path}")
     model = BGEM3FlagModel(model_name_or_path=str(model_path), use_fp16=False)
 

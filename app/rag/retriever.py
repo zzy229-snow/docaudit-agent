@@ -1,6 +1,6 @@
 """制度检索器(PRD §9.3)。RAG_MODE 控制后端:
 
-- mock   (默认):规则匹配基线,零依赖,保持协作者原有行为;
+- mock   (默认):规则匹配基线,零依赖,保持接口原有行为;
 - local  :本地制度切片关键词检索,零外部服务,用于生产化演示前的真实检索基线;
 - milvus :向量混合检索(需已运行 build_index.py 建立索引;编码依赖见 requirements-rag.txt)。
 
@@ -142,7 +142,7 @@ def _retrieve_mock(city: str | None, expense_type: str | None = None,
                    department: str | None = None, as_of: str | None = None) -> list[PolicyEvidence]:
     """规则匹配基线(任务⑥):城市匹配 + 费用类型过滤 + 已发布制度参与。
 
-    兼容协作者基线:仅按城市查询(expense_type=TRAVEL/None)时,保持原 travel 语义
+    兼容既有行为:仅按城市查询(expense_type=TRAVEL/None)时,保持原 travel 语义
     (一线命中 A、其他命中 B);已发布制度仅在条款显式包含该城市时以更高权重参与
     (score 1.05),不覆盖基线的"其他城市"兜底条款,避免改变既有评测结论。
     """
@@ -207,10 +207,15 @@ def _retrieve_milvus(query: str, expense_type: str | None = None,
     from FlagEmbedding import BGEM3FlagModel
     from .vector_store import VectorStore
 
-    model_path = os.environ.get(
-        "BGE_MODEL_DIR",
-        r"<bge-m3 目录>",
-    )
+    model_path = os.environ.get("BGE_MODEL_DIR", "").strip()
+    if not model_path:
+        local = Path(__file__).resolve().parents[2] / "data" / "rag" / "bge-m3"
+        if not local.exists():
+            raise RuntimeError(
+                "未配置 bge-m3 权重目录:请设置环境变量 BGE_MODEL_DIR(优先),"
+                f"或把权重下载到 {local}(见 docs/RAG_INTEGRATION.md)"
+            )
+        model_path = str(local)
     model = BGEM3FlagModel(model_name_or_path=model_path, use_fp16=False)
     out = model.encode([query], return_dense=True, return_sparse=True)
     dense = out["dense_vecs"][0].tolist()

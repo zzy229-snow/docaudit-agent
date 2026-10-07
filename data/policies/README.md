@@ -18,8 +18,8 @@
 ## 使用
 
 ```bash
-# 建立/重建 Milvus 索引(bge-m3 编码,需 RAG 环境 环境)
-<RAG 环境>/python.exe -m app.rag.build_index
+# 建立/重建 Milvus 索引(bge-m3 编码,需 独立的 RAG 环境 环境)
+BGE_MODEL_DIR=<bge-m3 目录> python -m app.rag.build_index
 
 # 运行检索(默认 mock;设 RAG_MODE=milvus 使用向量检索)
 ```

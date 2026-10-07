@@ -1,4 +1,4 @@
-"""RAG mock 路由测试(PRD §9.3/§23.5):默认零依赖,协作者基线行为不变,失败可降级。"""
+"""RAG mock 路由测试(PRD §9.3/§23.5):默认零依赖,接口基线行为不变,失败可降级。"""
 
 import unittest
 from unittest.mock import patch
@@ -37,7 +37,7 @@ class RagMockRouteTests(unittest.TestCase):
         self.assertEqual(retrieve_policy(None), [])
 
     def test_contract_unchanged(self):
-        """输出契约:PolicyEvidence(chunk_id/section/content/score),与协作者基线一致。"""
+        """输出契约:PolicyEvidence(chunk_id/section/content/score),与接口契约一致。"""
         result = retrieve_policy("北京")
         for item in result:
             self.assertTrue(hasattr(item, "chunk_id"))

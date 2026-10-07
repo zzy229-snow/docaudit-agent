@@ -1,7 +1,7 @@
 # RAG 向量检索专用依赖(PRD §23.5 服务拆分)。
 # 主 requirements.txt 不包含这些重型依赖;启用 RAG_MODE=milvus 前先安装:
 #   .venv/Scripts/python -m pip install -r requirements-rag.txt
-# 提示:也可直接使用已配置好的 RAG 环境 conda 环境(<RAG 环境>)运行 build_index。
+# 提示:重型依赖建议装在独立虚拟/conda 环境中,不要混进主环境。
 pymilvus>=2.6,<3
 FlagEmbedding>=1.2,<2
 torch>=2.0

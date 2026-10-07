@@ -127,13 +127,13 @@ BAIDU_OCR_SECRET_KEY=你的Secret Key    # 同一位置的「应用密钥」(32 
 企业报销场景里很多客户**不允许发票出内网**，这条路就是给他们的：MinerU 本地版面解析，
 免费、离线，识别质量实测远超 Tesseract（后者对同一张测试票**一个字段都抽不出来**）。
 
-本机已经装了（复用 `本地 MinerU 环境` 那份，模型也已下载 1.1GB）：
+MinerU 是**可选**的本地引擎（免费、离线、不把发票外发）。先自己装好 MinerU 并下载模型，再指过去：
 
 ```dotenv
 OCR_ENGINE=mineru
 # 默认值就是下面这两条,机器上路径不同才需要写
-# MINERU_EXE=<MinerU 环境>\.venv\Scripts\mineru.exe
-# MODELSCOPE_CACHE=<MinerU 环境>\models
+# MINERU_EXE=<你的 venv>/Scripts/mineru.exe
+# MODELSCOPE_CACHE=<模型缓存目录>
 MINERU_BACKEND=pipeline
 MINERU_API_URL=http://127.0.0.1:8321
 ```

@@ -79,7 +79,7 @@ curl -sL -o data/ocr_models/tessdata/chi_sim.traineddata \
 OCR_ENGINE=auto
 TESSERACT_EXE=C:\Program Files\Tesseract-OCR\tesseract.exe
 TESSERACT_LANG=chi_sim+eng
-TESSERACT_DATA_DIR=<仓库目录>\data\ocr_models\tessdata
+TESSERACT_DATA_DIR=<你的 tessdata 目录>(仓库不带语言包)
 OCR_PREPROCESS=1
 ```
 

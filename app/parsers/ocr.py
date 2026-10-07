@@ -430,15 +430,16 @@ class MineruOcrEngine(OcrEngine):
 
     def __init__(self, exe: str, cache_dir: str, model_source: str = "modelscope",
                  backend: str = "pipeline", api_url: str = "") -> None:
-        self.exe = Path(exe)
-        self.cache_dir = Path(cache_dir)
+        #: 未配置时为 None —— 不能写成 Path("")(那会等于当前目录,exists() 为真)
+        self.exe = Path(exe) if exe else None
+        self.cache_dir = Path(cache_dir) if cache_dir else None
         self.model_source = model_source
         self.backend = backend
         #: 常驻 mineru-api 地址(为空则每次自起临时服务,很慢)
         self.api_url = api_url
 
     def available(self) -> bool:
-        return self.exe.exists()
+        return self.exe is not None and self.exe.exists()
 
     def resolved_api_url(self) -> str:
         """常驻服务不可达时返回空串(不传 ``--api-url``)。
@@ -458,8 +459,13 @@ class MineruOcrEngine(OcrEngine):
             return ""
 
     def recognize(self, content: bytes) -> str:
+        if self.exe is None:
+            raise FileNotFoundError(
+                "未配置 MINERU_EXE:请把它指向你本机的 mineru 可执行文件"
+                "(如 <你的venv>\\Scripts\\mineru.exe),或改用 OCR_ENGINE=tesseract/http。"
+            )
         if not self.exe.exists():
-            raise FileNotFoundError(f"MINERU_EXE 不存在: {self.exe}")
+            raise FileNotFoundError(f"MINERU_EXE 指向的文件不存在: {self.exe}")
         with tempfile.TemporaryDirectory(prefix="docaudit_ocr_") as tmp:
             tmpdir = Path(tmp)
             suffix = ".png" if content[:8].startswith(b"\x89PNG") else ".pdf"
@@ -468,7 +474,8 @@ class MineruOcrEngine(OcrEngine):
             out_dir = tmpdir / "out"
             env = os.environ.copy()
             env["MINERU_MODEL_SOURCE"] = self.model_source
-            env["MODELSCOPE_CACHE"] = str(self.cache_dir)
+            if self.cache_dir is not None:
+                env["MODELSCOPE_CACHE"] = str(self.cache_dir)
             command = [str(self.exe), "-p", str(source), "-o", str(out_dir), "-b", self.backend]
             api_url = self.resolved_api_url()
             if api_url:
@@ -576,11 +583,13 @@ def get_ocr_engine() -> OcrEngine:
 
 
 def _build_mineru_engine() -> MineruOcrEngine:
-    # 与 MinerU 已装环境一致的默认:脚本目录在 .venv/Scripts, 模型在同级 models/
-    exe = os.environ.get("MINERU_EXE", r"<MinerU 环境>\.venv\Scripts\mineru.exe")
+    # 需要用户显式配置(开源版不带任何本机默认路径):
+    #   MINERU_EXE        mineru 可执行文件(Windows 一般在 <venv>/Scripts/mineru.exe)
+    #   MODELSCOPE_CACHE  / MINERU_MODELS  模型缓存目录
+    exe = os.environ.get("MINERU_EXE", "").strip()
     cache = os.environ.get(
         "MODELSCOPE_CACHE",
-        os.environ.get("MINERU_MODELS", r"<MinerU 环境>\models"),
+        os.environ.get("MINERU_MODELS", "").strip(),
     )
     return MineruOcrEngine(
         exe=exe,

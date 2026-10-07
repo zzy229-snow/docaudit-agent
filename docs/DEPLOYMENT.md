@@ -44,7 +44,7 @@ docker compose exec api python -c "from app.agent.graph import resolve_engine; p
 
 ```bash
 bash scripts/start.sh                     # 创建 .venv → 安装依赖 → 启动 API(8000)+工作台(8500)
-API_PORT=8101 WEB_PORT=8501 bash scripts/start.sh   # 自定义端口（PRD §22.3 协作者）
+API_PORT=8101 WEB_PORT=8501 bash scripts/start.sh   # 自定义端口
 bash scripts/stop.sh                      # 按 logs/*.pid 停止
 ```
 

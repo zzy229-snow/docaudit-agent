@@ -11,13 +11,17 @@ REM   OCR_ENGINE=mineru
 REM   MINERU_API_URL=http://127.0.0.1:8321
 REM 若本服务未启动,引擎会自动退回"不用 --api-url"(慢但能出结论,不会失败)。
 REM
-REM 依赖:一台已安装 MinerU 的环境(默认复用 本地 MinerU 环境 那份)与已下载的模型。
+REM 依赖:你本机已安装 MinerU,并已设置 MINERU_EXE / MODELSCOPE_CACHE。
 REM 可用环境变量覆盖:MINERU_EXE / MODELSCOPE_CACHE / MINERU_MODEL_SOURCE / MINERU_API_PORT
 REM ============================================================
 setlocal
 
-if "%MINERU_EXE%"=="" set "MINERU_EXE=<MinerU 环境>\.venv\Scripts\mineru-api.exe"
-if "%MODELSCOPE_CACHE%"=="" set "MODELSCOPE_CACHE=<MinerU 环境>\models"
+if "%MINERU_EXE%"=="" (
+  echo [错误] 请设置 MINERU_EXE 指向你本机的 mineru-api 可执行文件
+  echo        例如 set MINERU_EXE=D:\venvs\mineru\Scripts\mineru-api.exe
+  exit /b 1
+)
+if "%MODELSCOPE_CACHE%"=="" set "MODELSCOPE_CACHE=%USERPROFILE%\.cache\modelscope"
 if "%MINERU_MODEL_SOURCE%"=="" set "MINERU_MODEL_SOURCE=modelscope"
 if "%MINERU_API_PORT%"=="" set "MINERU_API_PORT=8321"
 

@@ -3,6 +3,8 @@
 不依赖真实 OCR 引擎(用 fake 引擎),保证离线确定性;真实引擎留集成路径。
 """
 
+import os
+import shutil
 import unittest
 from io import BytesIO
 from pathlib import Path
@@ -271,12 +273,19 @@ class EndToEndReviewTests(unittest.TestCase):
         self.assertNotIn("OCR_QUALITY_REVIEW", risk_types)
 
 
-TESSERACT_EXE = "C:/Program Files/Tesseract-OCR/tesseract.exe"
+#: 真实 Tesseract 集成测试:按环境变量 → PATH → 常见安装位置依次探测(不写死个人路径)
+_TESSERACT_CANDIDATES = [
+    os.environ.get("TESSERACT_EXE"),
+    shutil.which("tesseract"),
+    "C:/Program Files/Tesseract-OCR/tesseract.exe",   # Windows 默认安装位置
+    "/usr/bin/tesseract", "/usr/local/bin/tesseract", # Linux/macOS 常见位置
+]
+TESSERACT_EXE = next((p for p in _TESSERACT_CANDIDATES if p and Path(p).exists()), "")
 TESSDATA_DIR = Path(__file__).resolve().parents[1] / "data" / "ocr_models" / "tessdata"
 
 
 @unittest.skipUnless(
-    Path(TESSERACT_EXE).exists() and (TESSDATA_DIR / "chi_sim.traineddata").exists(),
+    bool(TESSERACT_EXE) and Path(TESSERACT_EXE).exists() and (TESSDATA_DIR / "chi_sim.traineddata").exists(),
     "本机未安装 Tesseract 或缺少 chi_sim 中文语言包",
 )
 class RealTesseractIntegrationTests(unittest.TestCase):
