@@ -246,23 +246,15 @@ def _content_matches_expense(content: str, expense_type: str) -> bool:
 
 def _retrieve_milvus(query: str, expense_type: str | None = None,
                      department: str | None = None) -> list[PolicyEvidence]:
-    """Milvus 混合检索:编码查询 → 稠密+稀疏 → RRF 融合(任务⑥:元数据过滤)。"""
-    from FlagEmbedding import BGEM3FlagModel
-    from .vector_store import VectorStore
+    """Milvus 检索:编码查询 → 稠密(可选+稀疏加权) → 元数据过滤(任务⑥)。
 
-    model_path = os.environ.get("BGE_MODEL_DIR", "").strip()
-    if not model_path:
-        local = Path(__file__).resolve().parents[2] / "data" / "rag" / "bge-m3"
-        if not local.exists():
-            raise RuntimeError(
-                "未配置 bge-m3 权重目录:请设置环境变量 BGE_MODEL_DIR(优先),"
-                f"或把权重下载到 {local}(见 docs/RAG_INTEGRATION.md)"
-            )
-        model_path = str(local)
-    model = BGEM3FlagModel(model_name_or_path=model_path, use_fp16=False)
-    out = model.encode([query], return_dense=True, return_sparse=True)
-    dense = out["dense_vecs"][0].tolist()
-    sparse = dict(out["lexical_weights"][0])
+    编码器与连接都走进程内单例(``embedding.get_model`` / ``vector_store.get_store``):
+    原来每次检索都重新加载一次 bge-m3 权重(实测 3.1s/次),纯属浪费。
+    """
+    from .embedding import encode_query, get_model
+    from .vector_store import get_store
+
+    dense, sparse = encode_query(get_model(), query)
 
     # 元数据过滤表达式(milvus filter 语法)
     clauses = []
@@ -272,5 +264,5 @@ def _retrieve_milvus(query: str, expense_type: str | None = None,
         clauses.append(f'department == "{department}"')
     filter_expr = " && ".join(clauses) if clauses else ""
 
-    store = VectorStore()
+    store = get_store()
     return store.hybrid_search(dense_vec=dense, sparse_vec=sparse, limit=2, filters=filter_expr)

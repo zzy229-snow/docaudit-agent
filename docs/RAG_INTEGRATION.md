@@ -76,6 +76,24 @@ rag: milvus(融合=稠密,命中2条)
 rag: milvus 检索失败，已降级 mock:ConnectionConfigException()(根因: DataDirLockedError(...))
 ```
 
+### 性能：编码器与连接进程内复用
+
+bge-m3 权重约 2GB，**加载一次约 13 秒**（冷盘）。所以 `app/rag/embedding.py` 用进程内单例持有模型、
+`vector_store.get_store()` 复用同一个 Milvus 连接——检索时只做「编码 + 近邻搜索」。
+
+实测（同一进程连续 5 次查询，16 chunk 语料）：
+
+| | 首次查询 | 之后每次 |
+| --- | --- | --- |
+| 复用前（每次 new 模型） | 16.2s | 3.1s |
+| 复用后 | 13.0s | **0.15s** |
+
+内存代价：模型常驻约 2GB。机器吃紧时设 `RAG_BGE_FP16=1` 减半（CPU 上可能更慢，需实测取舍）；
+不想要常驻就用 `RAG_MODE=local`（关键词检索，零权重依赖，毫秒级）。
+
+`tests/test_rag_embedding_cache.py` 用假模型把「同一路径只加载一次」钉成回归测试，
+防止以后有人把 `BGEM3FlagModel(...)` 挪回函数体内导致性能静默退化。
+
 ### 单进程独占：milvus-lite 的锁限制（多进程部署必读）
 
 **Milvus Lite 是文件级数据库，同一时刻只允许一个进程打开 `data/rag/policy.db`。** 本项目会起两个进程

@@ -18,12 +18,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from app.rag.chunker import chunk_policy_documents
-from app.rag.vector_store import VectorStore
 
 POLICY_DIR = Path(__file__).resolve().parents[2] / "data" / "policies"
 MODEL_DIR = Path(__file__).resolve().parents[2] / "data" / "rag" / "bge-m3"
-#: bge-m3 权重目录:优先 BGE_MODEL_DIR,其次仓库内 data/rag/bge-m3(未下载时给出可操作提示)
-DEFAULT_MODEL_DIR = Path(os.environ["BGE_MODEL_DIR"]) if os.environ.get("BGE_MODEL_DIR") else MODEL_DIR
 
 
 def encode(model, chunks):
@@ -40,17 +37,15 @@ def main() -> None:
     args = ap.parse_args()
     os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
-    from FlagEmbedding import BGEM3FlagModel
+    from app.rag.embedding import get_model, resolve_model_path
+    from app.rag.vector_store import get_store
 
-    model_path = DEFAULT_MODEL_DIR if DEFAULT_MODEL_DIR.exists() else MODEL_DIR
-    if not model_path.exists():
-        raise SystemExit(
-            f"找不到 bge-m3 权重目录:{model_path}\n"
-            "请用 BGE_MODEL_DIR 指向你本机的 bge-m3 目录,或把权重下载到 "
-            f"{MODEL_DIR}(见 docs/RAG_INTEGRATION.md)"
-        )
+    try:
+        model_path = resolve_model_path()
+    except RuntimeError as exc:
+        raise SystemExit(f"{exc}\n请用 BGE_MODEL_DIR 指向你本机的 bge-m3 目录,或把权重下载到 {MODEL_DIR}")
     print(f"[1/3] 加载 bge-m3: {model_path}")
-    model = BGEM3FlagModel(model_name_or_path=str(model_path), use_fp16=False)
+    model = get_model(model_path)
 
     print("[2/3] 切片制度...")
     chunks = chunk_policy_documents(POLICY_DIR)
@@ -61,7 +56,7 @@ def main() -> None:
 
     print("[3/3] 编码 + 写入 Milvus Lite...")
     dense, sparse = encode(model, chunks)
-    store = VectorStore()
+    store = get_store()
     if not args.append:
         store.clear()
     rows = [c.to_milvus_row(d, s) for c, d, s in zip(chunks, dense, sparse)]

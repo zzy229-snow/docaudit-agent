@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 import os
+import threading
 from pathlib import Path
 
 from app.models.audit import PolicyEvidence
@@ -138,3 +139,30 @@ class VectorStore:
                 score=round(hit.get("distance", 0.0), 4),
             ))
         return evidence
+
+
+_LOCK = threading.Lock()
+_STORES: dict[tuple[str, str], VectorStore] = {}
+
+
+def get_store(uri: str | None = None, collection: str = COLLECTION) -> VectorStore:
+    """进程内复用同一个 :class:`VectorStore`(按 ``uri``+collection 缓存)。
+
+    两处收益:
+    1. 省掉每次检索重新连库 + ``load_collection`` 的开销;
+    2. **Milvus Lite 是文件级单进程独占锁** —— 进程内只持有一个连接,语义更清楚:
+       "谁先连上谁持有,直到进程退出"(多进程并发的限制见 docs/RAG_INTEGRATION.md)。
+    """
+    key = (uri or os.environ.get("MILVUS_URI", str(Path(__file__).resolve().parents[2] / "data" / "rag" / "policy.db")), collection)
+    with _LOCK:
+        store = _STORES.get(key)
+        if store is None:
+            store = VectorStore(uri=uri, collection=collection)
+            _STORES[key] = store
+        return store
+
+
+def reset_stores() -> None:
+    """丢弃缓存的连接(测试或切换 ``MILVUS_URI`` 后使用)。"""
+    with _LOCK:
+        _STORES.clear()

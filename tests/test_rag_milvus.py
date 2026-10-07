@@ -73,6 +73,14 @@ class RagMilvusTests(unittest.TestCase):
         from app.rag import retriever
         cls._old = retriever.RAG_MODE
         retriever.RAG_MODE = "milvus"
+        # 兜底:用例执行顺序不保证,别的用例可能清理过环境变量;这里再读一次 .env,
+        # 保证权重路径在本进程可见(否则会静默降级到 mock,断言失败但看不出原因)
+        if not os.environ.get("BGE_MODEL_DIR", "").strip():
+            try:
+                from dotenv import load_dotenv
+                load_dotenv(BASE / ".env", override=False)
+            except Exception:
+                pass
 
     @classmethod
     def tearDownClass(cls):
