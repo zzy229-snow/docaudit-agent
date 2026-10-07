@@ -73,8 +73,21 @@ BGE_MODEL_DIR=D:\models\bge-m3
 
 ```
 rag: milvus(融合=稠密,命中2条)
-rag: milvus 检索失败，已降级 mock:RuntimeError('未配置 bge-m3 权重目录...')
+rag: milvus 检索失败，已降级 mock:ConnectionConfigException()(根因: DataDirLockedError(...))
 ```
+
+### 单进程独占：milvus-lite 的锁限制（多进程部署必读）
+
+**Milvus Lite 是文件级数据库，同一时刻只允许一个进程打开 `data/rag/policy.db`。** 本项目会起两个进程
+（API `8000` + 工作台 `8500`），它们都可能在审核时检索制度，于是**后拿到锁的那个会失败并降级到 mock**，
+表现就是 trace 里出现上面第二条 `rag:` 行（根因写着 `DataDirLockedError`）。
+
+应对方式：
+
+| 场景 | 做法 |
+| --- | --- |
+| 演示/单进程使用 | 只让一个进程承担检索：要么只用工作台，要么只用 API；另一个进程的审核会降级到 mock（trace 可见，不会给出错误结论） |
+| 多进程/生产 | 换成 **Milvus 服务端**（独立进程，客户端可并发），把 `MILVUS_URI` 指向它即可；或用 `RAG_MODE=local`（纯文件切片检索，无锁问题） |
 
 集成测试 `tests/test_rag_milvus.py` 会断言"确实走了 milvus 且未降级"，并在缺少权重目录时整组跳过 ——
 避免出现"环境没配好、测试却全绿"的假信心（这是实际踩过的坑）。

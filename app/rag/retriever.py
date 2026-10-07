@@ -34,6 +34,20 @@ def set_retrieval_note(text: str) -> None:
     RETRIEVAL_NOTE = text
 
 
+def _degrade_reason(exc: BaseException) -> str:
+    """把底层原因也带上。
+
+    milvus-lite 是**文件级单进程独占锁**:工作台与 API 两个进程同时跑时,后启动的那个拿不到锁,
+    pymilvus 只会抛一个没有信息的 ``ConnectionConfigException()``,真正的原因(DataDirLockedError)
+    在 ``__cause__`` 里。不带出来时,运维只看到"检索失败"却不知道是锁冲突。
+    """
+    cause = exc.__cause__
+    text = f"{exc!r}"
+    if cause is not None and repr(cause) != repr(exc):
+        text += f"(根因: {cause!r})"
+    return text
+
+
 def _fusion_label() -> str:
     """当前融合方式的可读标签(与 vector_store.SPARSE_WEIGHT_ENV 对应)。"""
     from .vector_store import SPARSE_WEIGHT_ENV
@@ -127,7 +141,7 @@ def retrieve_policy(city: str | None, query: str | None = None,
             set_retrieval_note(f"milvus(融合={_fusion_label()},命中{len(evidence)}条)")
             return evidence
         except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
-            set_retrieval_note(f"milvus 检索失败，已降级 mock:{exc!r}")
+            set_retrieval_note(f"milvus 检索失败，已降级 mock:{_degrade_reason(exc)}")
             print(f"[rag] milvus 检索失败,降级 mock: {exc!r}")
             return _retrieve_mock(city, expense_type, department, as_of)
     set_retrieval_note("mock(规则匹配，未使用向量检索)")

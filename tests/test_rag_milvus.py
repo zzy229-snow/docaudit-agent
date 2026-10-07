@@ -27,27 +27,45 @@ except ImportError:
 
 
 def _model_path_configured() -> bool:
-    """必须有可用的 bge-m3 权重目录,否则 milvus 检索必然降级,测试没有意义。"""
+    """必须有可用的 bge-m3 权重目录,否则 milvus 检索必然降级,测试没有意义。
+
+    这里**显式读一次仓库 .env**:单测默认不加载 .env(见 tests/__init__.py 的隔离约定),
+    但本用例是"真机集成验证",机器级配置(权重放在哪)本来就该从 .env 读。
+    不读的话,开发者在 .env 里配了 BGE_MODEL_DIR、测试却一直 skip —— 等于没验证。
+    """
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(BASE / ".env", override=False)
+    except Exception:
+        pass
     configured = os.environ.get("BGE_MODEL_DIR", "").strip()
     if configured and Path(configured).exists():
         return True
     return (BASE / "data" / "rag" / "bge-m3").exists()
 
 
-def _index_ready() -> bool:
+def _index_state() -> tuple:
+    """返回 (是否可用, 不可用原因)。原因写进 skip 提示,免得把"锁被占用"误读成"没建索引"。"""
     try:
         from app.rag.vector_store import COLLECTION, VectorStore  # noqa: F401
         store = VectorStore()
         total = store.client.get_collection_stats(store.collection).get("row_count", 0)
-        return total > 0
-    except Exception:
-        return False
+        return (total > 0), ("" if total > 0 else "集合已连接但为空,请先运行 python -m app.rag.build_index")
+    except Exception as exc:
+        cause = exc.__cause__
+        text = f"{exc!r}"
+        if cause is not None and repr(cause) != repr(exc):
+            text += f"(根因: {cause!r})"
+        return False, text
+
+
+_INDEX_OK, _INDEX_WHY = _index_state()
 
 
 @unittest.skipUnless(
-    _HAS_BGE and _model_path_configured() and _index_ready(),
-    "需要 bge-m3 权重(设 BGE_MODEL_DIR 或放到 data/rag/bge-m3)与已建立的 Milvus 索引"
-    "(先运行 python -m app.rag.build_index)",
+    _HAS_BGE and _model_path_configured() and _INDEX_OK,
+    "需要 bge-m3 权重(设 BGE_MODEL_DIR 或放到 data/rag/bge-m3)与可用的 Milvus 索引"
+    "(先运行 python -m app.rag.build_index);当前索引不可用原因: " + (_INDEX_WHY or "bge-m3 权重缺失"),
 )
 class RagMilvusTests(unittest.TestCase):
     @classmethod
