@@ -57,7 +57,7 @@ Windows 使用 `scripts\start.bat`（可用 `set API_PORT=8102 && set WEB_PORT=8
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 cp .env.example .env                              # 默认 mock 模式,无需密钥
-uvicorn app.api.main:app --reload --port 8102      # API 与文档 http://127.0.0.1:8102/docs
+uvicorn app.api.main:app --reload --port 8000      # API 与文档 http://127.0.0.1:8000/docs
 streamlit run streamlit_app.py                     # 审核工作台
 ```
 

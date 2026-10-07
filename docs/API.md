@@ -11,16 +11,18 @@
 在仓库根目录运行：
 
 ```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.api.main:app --reload --port 8102
+.\.venv\Scripts\python.exe -m uvicorn app.api.main:app --reload --port 8000
 ```
 
 打开接口文档：
 
 ```text
-http://127.0.0.1:8102/docs
+http://127.0.0.1:8000/docs
 ```
 
-开发时可以自定义端口（如 `8102`），公共联调统一用 `8000`。
+`127.0.0.1` 指**运行服务的那台机器**（服务没启动则打不开这个页面）；要让别的机器访问，启动时加 `--host 0.0.0.0`，并把地址换成本机 IP 或域名，详见 README「FastAPI接口」一节。
+
+端口可自定义（`--port` 或环境变量 `API_PORT`，例如 `8102`），文档地址随之变化。
 
 ## 3. 接口清单
 
@@ -203,10 +205,10 @@ curl -X PATCH http://127.0.0.1:8000/api/v1/audit-tasks/task-xxxxxxxxxxxx \
 示例：
 
 ```bash
-curl -X POST http://127.0.0.1:8102/api/v1/policies \
+curl -X POST http://127.0.0.1:8000/api/v1/policies \
   -F "file=@travel_policy.txt" -F "name=差旅住宿制度" -F "version=V1" \
   -F "effective_from=2026-01-01" -F "department=ALL" -F "expense_type=TRAVEL"
-curl -X POST "http://127.0.0.1:8102/api/v1/policies/UP-XXXXXXXX/publish?switch_version=true"
+curl -X POST "http://127.0.0.1:8000/api/v1/policies/UP-XXXXXXXX/publish?switch_version=true"
 ```
 
 ### 9.2 离线评测（PRD §12.2）

@@ -26,7 +26,7 @@ streamlit run streamlit_app.py          # 审核工作台 http://127.0.0.1:8500
 跑一遍回归测试确认环境正常（**测试离线，不需要任何 Key**）：
 
 ```bash
-python -m unittest discover -s tests    # 339 例,全离线,约 25 秒
+python -m unittest discover -s tests    # 371 例,全离线,约 45 秒
 ```
 
 一键启动（含依赖安装与就绪检查）：`bash scripts/start.sh`（Windows：`scripts\start.bat`），
@@ -40,10 +40,23 @@ Streamlit 页面已升级为审核工作台形态：左侧可创建 5 组虚构�
 ## FastAPI接口
 
 ```bash
-python -m uvicorn app.api.main:app --reload --port 8102
+python -m uvicorn app.api.main:app --reload --port 8000
 ```
 
-接口文档地址：`http://127.0.0.1:8102/docs`。当前API默认使用本地 SQLite 任务存储，数据落在 `data/runtime/audit_tasks.sqlite3`，支持创建任务、上传材料、运行审核、任务列表、生命周期事件、字段修正、人工复核决策，以及查询字段、风险、执行轨迹和可解释摘要。详细说明见 `docs/API.md`。
+接口文档地址：`http://127.0.0.1:8000/docs`（FastAPI 自带的 Swagger UI）。当前API默认使用本地 SQLite 任务存储，数据落在 `data/runtime/audit_tasks.sqlite3`，支持创建任务、上传材料、运行审核、任务列表、生命周期事件、字段修正、人工复核决策，以及查询字段、风险、执行轨迹和可解释摘要。详细说明见 `docs/API.md`。
+
+> **关于 `127.0.0.1` 这个地址（克隆项目后最常见的疑问）**
+>
+> `/docs` 不是一个托管在互联网上的网站，而是**你启动的这个 API 进程自己提供**的接口文档页面 —— 服务没启动就访问不了。
+> `127.0.0.1` 是**本机回环地址**，指"运行服务的那台机器"：你在自己电脑上启动服务，就在自己浏览器打开它；同事克隆项目后在他自己电脑上启动，打开的也是他机器上的 `127.0.0.1:8000`，两边互不影响。
+>
+> 要让**别的机器**访问（部署到服务器、给同事联调），三步：
+>
+> 1. 启动时放开监听地址：`python -m uvicorn app.api.main:app --host 0.0.0.0 --port 8000`（Docker 用 `docker compose up -d`，端口已映射到宿主机 8000）；
+> 2. 把 `127.0.0.1` 换成那台机器的 IP 或域名，例如 `http://192.168.1.20:8000/docs`；
+> 3. 放行防火墙端口。**公网暴露前务必先读 `docs/DEPLOYMENT.md` 的安全说明**：默认没有鉴权，需 `AUTH_MODE=enforce` 才开启最小 RBAC。
+>
+> 端口可自定义（`--port 8102` 或环境变量 `API_PORT`），文档地址随之变化。工作台同理：默认 `http://127.0.0.1:8500`。
 
 ## 已完成能力
 
@@ -75,9 +88,36 @@ python -m uvicorn app.api.main:app --reload --port 8102
 
 ## 模型API
 
-默认使用 `MODEL_PROVIDER=mock`，不需要API Key。真实模型接入通过 `app/services/model_gateway.py` 统一管理，字段抽取Prompt位于 `app/prompts/field_extraction_v1.txt`。LLM 字段抽取已加入 JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。配置说明见 `docs/MODEL_GATEWAY.md`，稳定性护栏说明见 `docs/LLM_ROBUSTNESS.md`。
+真实模型接入通过 `app/services/model_gateway.py` 统一管理，走**标准 OpenAI 兼容协议**（`OpenAI(base_url=...)` + `chat.completions.create(...)`），字段抽取Prompt位于 `app/prompts/field_extraction_v1.txt`。LLM 字段抽取已加入 JSON Schema 校验、原文证据校验、格式标准化、低置信拒收、重试和规则兜底。配置说明见 `docs/MODEL_GATEWAY.md`，稳定性护栏说明见 `docs/LLM_ROBUSTNESS.md`。
 
-购买真实API前，先复制 `.env.example` 为 `.env`。项目会自动读取仓库根目录下的 `.env`，但 `.env` 已被 `.gitignore` 排除，不要提交密钥。然后运行连通性检查：
+代码里的默认 provider 是 `mock`（保证单测与评测离线可复现），但**工作台不提供离线模式**：要运行审核必须由使用者提供自己的模型 API Key。
+
+### 工作台界面填空（推荐，不用改配置）
+
+侧栏「模型 API 设置（必填）」→ 选供应商（默认 DeepSeek 官方，地址与模型名自动带出）→ 填 Key → `测试连接` → `保存到本次会话`。三项都要填：**接口地址**、**API Key**、**模型名**。
+
+填地址的规则（最容易错的一处）：**填到版本路径为止（通常是 `/v1`），不要带 `/chat/completions`** —— SDK 会自己拼接；模型名要填 API 的 **model id**，不是控制台里的显示名。
+
+| 服务商 | 接口地址（base_url） | 模型名示例 |
+| --- | --- | --- |
+| DeepSeek 官方 | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| 硅基流动 | `https://api.siliconflow.cn/v1` | `deepseek-ai/DeepSeek-V3` |
+| 阿里云百炼（通义） | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` / `qwen-plus` |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | `glm-4.6` |
+| Kimi（月之暗面） | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
+| 火山方舟（豆包） | `https://ark.cn-beijing.volces.com/api/v3` | 方舟推理接入点 ID |
+| OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
+| **本地 vLLM** | `http://127.0.0.1:8000/v1` | 启动 vLLM 时指定的模型名 |
+| **本地 Ollama** | `http://127.0.0.1:11434/v1` | `qwen2.5:7b`（Key 填任意非空串，如 `ollama`） |
+
+> - **智谱的路径是 `/api/paas/v4` 而不是 `/v1`**：地址一律以服务商文档给出的 base_url 为准，只要它和 `/chat/completions` 拼起来能通即可。
+> - **不支持 Azure OpenAI**（需要 `api-version` 与 deployment 路径，本项目未实现）；要用 Azure 请先挂 one-api / new-api 之类的网关，再填网关地址。
+> - **常见报错**：`404` 多为地址多带了 `/chat/completions` 或漏了版本路径；`401` 多为 Key 失效或粘贴时带了换行；`404 model not found` 是模型名写成显示名了；连接超时先查网络与代理（要走代理时，给**启动服务的那个进程**设 `HTTPS_PROXY` 再重启）。
+> - **数据合规**：填云端 API 意味着材料文本会发到服务商。本项目「发票不外发」指的是本地 MinerU 识别那一步；对合规要求严格的企业客户，模型这一步也应走内网 —— 用 vLLM/Ollama 起一个 OpenAI 兼容端点（如 `http://127.0.0.1:8000/v1`），全链路即可留在内网。
+
+### 服务端 `.env` 配置（接口调用 / 无人值守场景）
+
+复制 `.env.example` 为 `.env`（已被 `.gitignore` 排除，**不要提交密钥**），填好后运行连通性检查：
 
 ```bash
 python -m app.services.model_smoke
