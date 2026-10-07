@@ -28,6 +28,12 @@ RAG_MODE = os.environ.get("RAG_MODE", "mock").strip().lower()
 #: 对"制度依据必须可追溯"的审核系统来说,这种静默降级是隐患(也让集成测试产生假信心)。
 RETRIEVAL_NOTE = ""
 
+#: 最近一次 milvus 检索用的重排层(实体 / 实体+bge-reranker-v2-m3 …),写进 trace 便于追溯
+LAST_RERANK_LABEL = ""
+
+#: 送进重排的候选条款数(重排要有腾挪空间:只取 2 条则排序问题无从修正)
+_CANDIDATES = 6
+
 
 def set_retrieval_note(text: str) -> None:
     global RETRIEVAL_NOTE
@@ -106,6 +112,14 @@ def _resolve_expense_type(files=None) -> str:
     return "TRAVEL"
 
 
+def _local_evidence(query: str, city: str | None, expense_type: str | None,
+                    department: str | None, as_of: str | None) -> list[PolicyEvidence]:
+    """走一次本地关键词检索(含已发布制度 + 城市语义重排)。"""
+    extra = published_chunks(department=department, expense_type=expense_type, as_of=as_of)
+    evidence = _retrieve_local(query or _query_from_city(city), extra_chunks=extra)
+    return _rerank_by_city(evidence, city)
+
+
 def retrieve_policy(city: str | None, query: str | None = None,
                     expense_type: str | None = None, department: str | None = None,
                     files=None, as_of: str | None = None) -> list[PolicyEvidence]:
@@ -115,6 +129,11 @@ def retrieve_policy(city: str | None, query: str | None = None,
     - department : 适用部门(如 研发部);
     - files      : 上传文件名列表,用于自动推断 expense_type(未显式指定时);
     - as_of      : 任务日期,用于制度版本生效区间过滤(FR-303/304)。
+
+    降级链:**milvus → local → mock**。向量检索失败时先退到本地关键词检索(仍是真检索、
+    结果可引用),只有 local 也失败才退到规则匹配基线。原来的降级链是 milvus → mock,
+    而 mock 只按城市字符串匹配、不看查询内容(问"发票代码怎么填"也会返回住宿条款),
+    用它兜底等于把"依据不可用"伪装成"有依据"。
 
     未指定费用类型时默认 TRAVEL(当前唯一接入的审核场景是差旅报销),
     以保证差旅 Recall@1 契约不被扩充制度干扰。返回契约 PolicyEvidence 不变。
@@ -126,24 +145,35 @@ def retrieve_policy(city: str | None, query: str | None = None,
 
     if RAG_MODE == "local":
         try:
-            extra = published_chunks(department=department, expense_type=expense_type, as_of=as_of)
-            evidence = _retrieve_local(query or _query_from_city(city), extra_chunks=extra)
-            evidence = _rerank_by_city(evidence, city)
+            evidence = _local_evidence(query, city, expense_type, department, as_of)
             set_retrieval_note(f"local(本地切片检索,命中{len(evidence)}条)")
             return evidence
         except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
-            set_retrieval_note(f"local 检索失败，已降级 mock:{exc!r}")
+            set_retrieval_note(f"local 检索失败，已降级 mock:{_degrade_reason(exc)}")
             print(f"[rag] local 检索失败,降级 mock: {exc!r}")
             return _retrieve_mock(city, expense_type, department, as_of)
     if RAG_MODE == "milvus":
         try:
-            evidence = _retrieve_milvus(query or city or "", expense_type, department)
-            set_retrieval_note(f"milvus(融合={_fusion_label()},命中{len(evidence)}条)")
+            global LAST_RERANK_LABEL
+            LAST_RERANK_LABEL = ""  # 防止上一次调用的标签残留到这次 trace
+            evidence = _retrieve_milvus(query or city or "", expense_type, department, city)
+            note = f"milvus(融合={_fusion_label()}"
+            if LAST_RERANK_LABEL:
+                note += f",重排={LAST_RERANK_LABEL}"
+            set_retrieval_note(note + f",命中{len(evidence)}条)")
             return evidence
-        except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
-            set_retrieval_note(f"milvus 检索失败，已降级 mock:{_degrade_reason(exc)}")
-            print(f"[rag] milvus 检索失败,降级 mock: {exc!r}")
-            return _retrieve_mock(city, expense_type, department, as_of)
+        except Exception as exc:  # noqa: BLE001
+            reason = _degrade_reason(exc)
+            try:
+                evidence = _local_evidence(query, city, expense_type, department, as_of)
+                set_retrieval_note(f"milvus 检索失败，已降级 local(关键词检索):{reason}")
+                print(f"[rag] milvus 检索失败,降级 local: {exc!r}")
+                return evidence
+            except Exception as exc2:  # noqa: BLE001 — 最后一层兜底
+                set_retrieval_note(
+                    f"milvus 检索失败，已降级 mock:{reason};local 亦失败:{_degrade_reason(exc2)}")
+                print(f"[rag] milvus/local 均失败,降级 mock: {exc!r} / {exc2!r}")
+                return _retrieve_mock(city, expense_type, department, as_of)
     set_retrieval_note("mock(规则匹配，未使用向量检索)")
     return _retrieve_mock(city, expense_type, department, as_of)
 
@@ -245,13 +275,19 @@ def _content_matches_expense(content: str, expense_type: str) -> bool:
 
 
 def _retrieve_milvus(query: str, expense_type: str | None = None,
-                     department: str | None = None) -> list[PolicyEvidence]:
-    """Milvus 检索:编码查询 → 稠密(可选+稀疏加权) → 元数据过滤(任务⑥)。
+                     department: str | None = None, city: str | None = None) -> list[PolicyEvidence]:
+    """Milvus 检索:编码查询 → 稠密(可选+稀疏加权) → 元数据过滤 → 重排(任务⑥)。
 
     编码器与连接都走进程内单例(``embedding.get_model`` / ``vector_store.get_store``):
     原来每次检索都重新加载一次 bge-m3 权重(实测 3.1s/次),纯属浪费。
+
+    候选池取 ``_CANDIDATES`` 条后交给 ``rerank`` 重排再截断:只取 2 条的话重排没有腾挪空间,
+    "上海住宿标准"这类实体张冠李戴的排序问题就修不掉。
     """
+    global LAST_RERANK_LABEL
+
     from .embedding import encode_query, get_model
+    from .rerank import rerank
     from .vector_store import get_store
 
     dense, sparse = encode_query(get_model(), query)
@@ -264,5 +300,8 @@ def _retrieve_milvus(query: str, expense_type: str | None = None,
         clauses.append(f'department == "{department}"')
     filter_expr = " && ".join(clauses) if clauses else ""
 
-    store = get_store()
-    return store.hybrid_search(dense_vec=dense, sparse_vec=sparse, limit=2, filters=filter_expr)
+    candidates = get_store().hybrid_search(dense_vec=dense, sparse_vec=sparse,
+                                           limit=_CANDIDATES, filters=filter_expr)
+    evidence, label = rerank(query, candidates, city=city, top_k=2)
+    LAST_RERANK_LABEL = label
+    return evidence

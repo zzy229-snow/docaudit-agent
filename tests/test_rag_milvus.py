@@ -88,11 +88,13 @@ class RagMilvusTests(unittest.TestCase):
         retriever.RAG_MODE = cls._old
 
     def test_engine_is_milvus_not_silently_degraded(self):
-        """防假信心:检索必须真的走 milvus,不能降级到 mock 还显示通过。"""
+        """防假信心:检索必须真的走 milvus,不能降级到 mock 还显示通过;重排层也要留痕。"""
         from app.rag import retriever
         retriever.retrieve_policy(None, query="北京出差住宿标准是多少元一晚")
         self.assertIn("milvus", retriever.RETRIEVAL_NOTE)
         self.assertNotIn("降级", retriever.RETRIEVAL_NOTE)
+        # 排序问题的修法是重排,不是悄悄少给几条 —— 用了哪一层必须写进 trace
+        self.assertIn("重排=", retriever.RETRIEVAL_NOTE)
 
     def test_retrieve_hotel_limit_first_city(self):
         from app.rag.retriever import retrieve_policy

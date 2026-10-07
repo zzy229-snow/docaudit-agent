@@ -66,15 +66,61 @@ BGE_MODEL_DIR=D:\models\bge-m3
 需要精确词命中（编号/金额类查询）时，设 `RAG_SPARSE_WEIGHT=0.3` 打开稠密+稀疏加权融合。
 实现与完整依据见 `app/rag/vector_store.py` 的 `SPARSE_WEIGHT_ENV`。
 
-### 降级是可见的
+### 重排（rerank）：修掉「实体张冠李戴」的排序
 
-检索失败（未建索引、模型缺失、Milvus 异常）时会降级到规则匹配，**不会中断审核**；降级原因会由
-`app/rag/retriever.py` 记入 `RETRIEVAL_NOTE`，并出现在审核 trace 的 `rag:` 行里，例如：
+双编码器把 query 和 doc **分别**编码，分不清条款里到底有没有提到用户问的那个具体实体。实测：
 
 ```
-rag: milvus(融合=稠密,命中2条)
-rag: milvus 检索失败，已降级 mock:ConnectionConfigException()(根因: DataDirLockedError(...))
+查询"上海住宿标准"
+  TRAVEL-V1-4.2-B  其他城市 450 元/晚        distance 0.5849   ← 排序在前（错）
+  TRAVEL-V1-4.2-A  北京/上海/广州/深圳 600   distance 0.6034   ← 才是答案
 ```
+
+只差 0.019，**靠调融合权重救不回来**（稀疏权重 0/0.3/0.5 三档排序不变）。所以检索后加一层重排
+（`app/rag/rerank.py`），候选池从 2 条放大到 6 条再重排截断：
+
+| 层 | 依赖 | 作用 |
+| --- | --- | --- |
+| **实体重排**（始终开启） | 无 | 条款提到查询/任务城市 > 「其他城市」兜底（查询城市不在条例枚举里时）> 其余；同档内保持原顺序 |
+| **交叉编码器**（可选） | bge-reranker 权重 | query+doc 一起过模型打分，应对措辞差异/同义改写等更泛化的排序问题 |
+
+启用交叉编码器：
+
+```bash
+BGE_RERANKER_DIR=D:\models\bge-reranker-v2-m3     # 或把权重放到 data/rag/bge-reranker-v2-m3
+# RAG_RERANK=0 可显式关闭这一层
+```
+
+未配置权重时自动只用实体重排，**不报错**；加载/打分失败也退回实体重排结果（排序问题不该升级成
+检索失败）。用了哪一层会写进 trace：`rag: milvus(融合=稠密,重排=实体,命中2条)`。
+
+实测（同一套 5 条查询，走生产入口 `retrieve_policy`）：
+
+| | 首名命中率 |
+| --- | --- |
+| 只靠向量 | 3/5（"上海"和"住宿费能报多少钱"给的是「其他城市」条款） |
+| 加实体重排 | **5/5** |
+
+回归测试：`tests/test_rag_rerank.py`（12 例，含"实体重排不得在查询无实体时改动顺序"这类可复现性约束）。
+
+### 降级链：milvus → local → mock
+
+检索失败（未建索引、模型缺失、Milvus 异常）时**不会中断审核**，按下面的顺序退：
+
+1. **milvus 失败 → local**（本地关键词检索，仍是真检索、结果可引用）；
+2. **local 也失败 → mock**（规则匹配基线，只按城市名字符串匹配）；
+3. 两层失败原因都写进 `RETRIEVAL_NOTE`，出现在审核 trace 的 `rag:` 行里。
+
+为什么不让 milvus 直接退到 mock：mock **不看查询内容** —— 实测问"发票代码和发票号码怎么填"，
+它照样返回住宿标准条款。把这种结果当"制度依据"写进报告，等于把"依据不可用"伪装成"有依据"。
+
+```
+rag: milvus(融合=稠密,重排=实体,命中2条)
+rag: milvus 检索失败，已降级 local(关键词检索):ConnectionConfigException()(根因: DataDirLockedError(...))
+rag: milvus 检索失败，已降级 mock:...;local 亦失败:...
+```
+
+回归测试：`tests/test_rag_degrade_chain.py`（5 例，含"不得在没降级时出现降级字样"的误报约束）。
 
 ### 性能：编码器与连接进程内复用
 
@@ -126,7 +172,8 @@ bge-m3 权重约 2GB，**加载一次约 13 秒**（冷盘）。所以 `app/rag/
 
 - 从 JSON 制度扩展到 Word/PDF 制度文档解析；
 - 保存 chunk 的制度版本、生效日期、部门、费用类型；
-- 增加 rerank；
-- 增加制度冲突检测；
-- 增加按日期和部门过滤；
-- 记录每次审核的检索 query、top-k 和命中分数。
+- 制度冲突检测；
+- 记录每次审核的检索 query、top-k 和命中分数；
+- 把 `section_path`（含条款号）一起编码进索引 —— 现在只编码 `content`，所以"按条款号问"
+  （如"4.2 条怎么规定的"）在向量侧命中不了，只有关键词侧（local）能匹配条款号。
+- （已完成）rerank：实体重排 + 可选 bge-reranker 交叉编码器，见 §2「重排（rerank）」。
