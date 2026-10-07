@@ -18,3 +18,8 @@ data/runtime/
 
 # 第三方模型/语言包不随仓库分发(体积大,README 说明获取方式)
 data/ocr_models/
+
+# RAG 权重(bge-m3 / bge-reranker,单个约 1~2.5GB):文档建议放到 data/rag/bge-*/ 下,
+# 这里显式忽略,避免误提交(这类文件一旦进了历史,清理成本极高)
+data/rag/bge-*/
+data/rag/*.db
