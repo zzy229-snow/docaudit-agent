@@ -36,18 +36,48 @@ data/policies/travel_policy.json
 
 Milvus 路径适合更接近生产的语义检索，但需要额外安装 `requirements-rag.txt` 中的依赖，并准备 bge-m3 模型。
 
-构建索引：
-
 ```powershell
-.\.venv\Scripts\python.exe -m app.rag.build_index
+# 1) 装依赖(注意 milvus-lite:只装 pymilvus 会在建索引时报
+#    "milvus-lite is required for local database connections")
+.\\.venv\\Scripts\\python.exe -m pip install -r requirements-rag.txt
+
+# 2) 建索引(bge-m3 权重需自行下载,~2GB;或用 BGE_MODEL_DIR 指向已有权重)
+$env:BGE_MODEL_DIR = "D:\\models\\bge-m3"
+.\\.venv\\Scripts\\python.exe -m app.rag.build_index
 ```
 
 启用：
 
 ```env
 RAG_MODE=milvus
-BGE_MODEL_DIR=D:\path\to\bge-m3
+BGE_MODEL_DIR=D:\models\bge-m3
 ```
+
+### 融合策略：默认只用稠密通道
+
+`RAG_SPARSE_WEIGHT` 默认 `0`（只用稠密向量）。**为什么**（2026-10-07 实测，三条黄金查询）：
+
+- 稀疏通道在本项目语料（16 chunk）上的 top1 常与语义无关 —— 问"杭州出差酒店费用上限"返回
+  `PHARM-V1-3.3`（药品制度）；
+- 等权 RRF 会把两路秩次相加，让"两路都排中等"的无关 chunk 压过"稠密通道第 1 名"的正确条款
+  （实测把 `TRAVEL-V1-4.2-B` 挤出第 1 名）；候选数越小、平票越多，同一查询两次运行还会翻转；
+- 稠密通道三条黄金查询全中。
+
+需要精确词命中（编号/金额类查询）时，设 `RAG_SPARSE_WEIGHT=0.3` 打开稠密+稀疏加权融合。
+实现与完整依据见 `app/rag/vector_store.py` 的 `SPARSE_WEIGHT_ENV`。
+
+### 降级是可见的
+
+检索失败（未建索引、模型缺失、Milvus 异常）时会降级到规则匹配，**不会中断审核**；降级原因会由
+`app/rag/retriever.py` 记入 `RETRIEVAL_NOTE`，并出现在审核 trace 的 `rag:` 行里，例如：
+
+```
+rag: milvus(融合=稠密,命中2条)
+rag: milvus 检索失败，已降级 mock:RuntimeError('未配置 bge-m3 权重目录...')
+```
+
+集成测试 `tests/test_rag_milvus.py` 会断言"确实走了 milvus 且未降级"，并在缺少权重目录时整组跳过 ——
+避免出现"环境没配好、测试却全绿"的假信心（这是实际踩过的坑）。
 
 ## 3. RAG 评测指标
 

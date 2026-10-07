@@ -22,6 +22,28 @@ POLICY_DIR = Path(__file__).resolve().parents[2] / "data" / "policies"
 
 RAG_MODE = os.environ.get("RAG_MODE", "mock").strip().lower()
 
+#: 最近一次检索的**说明**(用了哪个引擎、是否降级、命中几条)。
+#: 审核流程(``app.agent.nodes.retrieve``)会把它写进 trace —— 因为降级路径原来是静默的:
+#: milvus/local 检索一失败就退到 mock,只 print 一行,结论看起来却一样。
+#: 对"制度依据必须可追溯"的审核系统来说,这种静默降级是隐患(也让集成测试产生假信心)。
+RETRIEVAL_NOTE = ""
+
+
+def set_retrieval_note(text: str) -> None:
+    global RETRIEVAL_NOTE
+    RETRIEVAL_NOTE = text
+
+
+def _fusion_label() -> str:
+    """当前融合方式的可读标签(与 vector_store.SPARSE_WEIGHT_ENV 对应)。"""
+    from .vector_store import SPARSE_WEIGHT_ENV
+
+    weight = os.environ.get(SPARSE_WEIGHT_ENV, "0") or "0"
+    try:
+        return "稠密" if float(weight) <= 0 else f"稠密+稀疏(权重{weight})"
+    except ValueError:
+        return "稠密"
+
 _FIRST_TIER = {"北京", "上海", "广州", "深圳"}
 
 
@@ -92,16 +114,23 @@ def retrieve_policy(city: str | None, query: str | None = None,
         try:
             extra = published_chunks(department=department, expense_type=expense_type, as_of=as_of)
             evidence = _retrieve_local(query or _query_from_city(city), extra_chunks=extra)
-            return _rerank_by_city(evidence, city)
+            evidence = _rerank_by_city(evidence, city)
+            set_retrieval_note(f"local(本地切片检索,命中{len(evidence)}条)")
+            return evidence
         except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
+            set_retrieval_note(f"local 检索失败，已降级 mock:{exc!r}")
             print(f"[rag] local 检索失败,降级 mock: {exc!r}")
             return _retrieve_mock(city, expense_type, department, as_of)
     if RAG_MODE == "milvus":
         try:
-            return _retrieve_milvus(query or city or "", expense_type, department)
+            evidence = _retrieve_milvus(query or city or "", expense_type, department)
+            set_retrieval_note(f"milvus(融合={_fusion_label()},命中{len(evidence)}条)")
+            return evidence
         except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
+            set_retrieval_note(f"milvus 检索失败，已降级 mock:{exc!r}")
             print(f"[rag] milvus 检索失败,降级 mock: {exc!r}")
             return _retrieve_mock(city, expense_type, department, as_of)
+    set_retrieval_note("mock(规则匹配，未使用向量检索)")
     return _retrieve_mock(city, expense_type, department, as_of)
 
 

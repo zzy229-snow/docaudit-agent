@@ -41,26 +41,39 @@ def _isolated_eval_state(isolate: bool) -> Iterator[None]:
 
 @contextmanager
 def _synthetic_corpus_scope() -> Iterator[None]:
-    """评测语料是合成文本:评测期间一律使用 ``OCR_ENGINE=stub``。
+    """评测语料是合成文本,且评测必须离线可复现:强制 ``OCR_ENGINE=stub`` 与 ``RAG_MODE=mock``。
 
-    stub 引擎产出与 mock 相同的合成文本,但按"已识别"对待 —— 否则材料可读性判定
+    **OCR**:stub 引擎产出与 mock 相同的合成文本,但按"已识别"对待 —— 否则材料可读性判定
     (``app.services.readability``)会把所有含图片材料的用例判成"无法判定",评测基线
-    就不再反映主流程行为。
+    就不再反映主流程行为。这里默认强制 stub(而不是"用户配了真引擎就用真引擎"):评测是
+    离线回归基线,若沿用自己的真实 OCR(如 baidu),会联网、花额度、且结论不可复现。
+    确实想用真引擎跑评测时显式设 ``EVAL_OCR_ENGINE=baidu``(或 auto/tesseract)。
 
-    这里**默认强制** stub(而不是"用户配了真引擎就用真引擎"):评测是离线回归基线,
-    若沿用自己的真实 OCR(如 baidu),会联网、花额度、且结论不可复现。确实想用真引擎
-    跑评测时显式设 ``EVAL_OCR_ENGINE=baidu``(或 auto/tesseract)即可。仅在本次调用内
-    临时生效,退出即还原。
+    **RAG**:同理强制 ``mock``(规则匹配基线)。否则开发者本机 ``.env`` 里的
+    ``RAG_MODE=milvus`` 会让评测去加载 bge-m3 做向量检索:57 条用例慢一个数量级,
+    而且基线会随本机索引内容漂移(同一份代码在不同机器上跑出不同指标)。
+    要用真实检索跑评测时显式设 ``EVAL_RAG_MODE=milvus``(或 local)。
+
+    两项都只在本次调用内临时生效,退出即还原。
     """
-    previous = os.environ.get("OCR_ENGINE")
+    saved = {key: os.environ.get(key) for key in ("OCR_ENGINE", "RAG_MODE")}
     os.environ["OCR_ENGINE"] = os.environ.get("EVAL_OCR_ENGINE", "stub")
+    os.environ["RAG_MODE"] = os.environ.get("EVAL_RAG_MODE", "mock")
+    # retriever.RAG_MODE 是 import 时读一次的模块常量(单测也用它切换后端),
+    # 所以只设环境变量不够,必须同时改模块属性,退出时还原。
+    from app.rag import retriever as rag_retriever
+
+    saved_mode = rag_retriever.RAG_MODE
+    rag_retriever.RAG_MODE = os.environ["RAG_MODE"]
     try:
         yield
     finally:
-        if previous is None:
-            os.environ.pop("OCR_ENGINE", None)
-        else:
-            os.environ["OCR_ENGINE"] = previous
+        rag_retriever.RAG_MODE = saved_mode
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 class EvaluationCase(BaseModel):

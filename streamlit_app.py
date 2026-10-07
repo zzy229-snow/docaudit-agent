@@ -97,37 +97,54 @@ def load_demo_files(case: str) -> list[tuple[str, bytes]]:
 
 def provider_label() -> str:
     """侧栏指标用的模型来源(短):详情在下面 caption 里,避免 st.metric 省略号截断。"""
-    if runtime_llm_settings().get("model"):
-        return "页面填写"
-    provider = os.getenv("MODEL_PROVIDER", "mock").strip().lower()
-    if provider == "mock":
-        return "Mock / 离线安全模式"
-    return f"{provider} · {os.getenv('MODEL_NAME', '未设置模型名')}"
+    return llm_source_label()
 
 
 # ---------------- 模型 API 填空 ----------------
-#: 上线交付时客户拿到的应该是"填空",不是我们内置的 key。
+#: 上线交付时客户拿到的是"填空",不内置我们的 key,也不给离线选项。
+#: 默认即 DeepSeek 官方:填 key → 测试连接 → 保存到本次会话,才能运行审核。
 LLM_PRESETS: dict[str, tuple[str, str]] = {
-    "使用系统内置配置（.env）": ("", ""),
     "DeepSeek 官方": ("https://api.deepseek.com/v1", "deepseek-chat"),
     "OpenAI 兼容（自定义地址）": ("", ""),
 }
 
+#: 会话标记:显式点过「载入服务端已配置的 Key」才允许用 .env 的配置
+LLM_SERVER_FLAG = "llm_use_server_config"
+
 
 def runtime_llm_settings() -> dict:
-    """当前会话的模型配置(空 dict = 用 .env 内置)。
+    """当前会话的模型配置(来自**页面填写**;空 dict = 页面未配置)。
 
     只活在浏览器会话里:不落盘、不改进程环境变量 —— 进程级环境变量在多用户下会互相覆盖。
     """
     return dict(st.session_state.get("llm_settings") or {})
 
 
+def llm_configured() -> bool:
+    """是否具备可用的模型配置。
+
+    工作台**不再隐式回退**到服务端 ``.env``(否则会出现"页面没填也能跑",来源不可见);
+    想用服务端配置必须显式点「载入服务端已配置的 Key」。
+    """
+    return bool(runtime_llm_settings().get("api_key")) or bool(st.session_state.get(LLM_SERVER_FLAG))
+
+
+def llm_source_label() -> str:
+    """当前模型配置来源(侧栏指标用,短)。"""
+    settings = runtime_llm_settings()
+    if settings.get("model"):
+        return "页面填写"
+    if st.session_state.get(LLM_SERVER_FLAG):
+        return "服务端 .env"
+    return "未配置"
+
+
 def render_llm_settings() -> None:
     settings = runtime_llm_settings()
-    with st.expander("模型 API 设置（填空）", expanded=False):
+    with st.expander("模型 API 设置（必填）", expanded=not llm_configured()):
         st.caption(
-            "交付给客户时不留内置密钥：客户在这里填自己的 API Key 即可。"
-            "只作用于当前浏览器会话，不写入磁盘。（接口 `/api/v1` 仍读服务端 `.env`）"
+            "工作台**不内置密钥、也不跑离线模型**：请填你自己的模型 API Key。"
+            "只作用于当前浏览器会话，不写入磁盘。（接口 `/api/v1` 服务端另有自己的 `.env`）"
         )
         names = list(LLM_PRESETS)
         preset = st.selectbox("供应商", names)
@@ -148,20 +165,17 @@ def render_llm_settings() -> None:
         )
         model = st.text_input("模型名", key="llm_model_input", placeholder="deepseek-chat")
 
-        use_builtin = preset == names[0]
-        candidate = {} if use_builtin else {
+        candidate = {
             "provider": "openai-compatible",
             "base_url": base_url.strip(),
             "api_key": api_key.strip(),
             "model": model.strip(),
         }
-        incomplete = not use_builtin and not all(candidate.values())
+        incomplete = not all(candidate.values())
 
         left, right = st.columns(2)
         if left.button("测试连接", use_container_width=True):
-            if use_builtin:
-                st.info("当前选择的是系统内置配置，未填写任何 key。")
-            elif incomplete:
+            if incomplete:
                 st.error("接口地址、API Key、模型名三项都要填。")
             else:
                 with st.spinner("正在调用模型…"):
@@ -171,23 +185,28 @@ def render_llm_settings() -> None:
                     except Exception as exc:  # 鉴权/网络失败要让填的人直接看到原因
                         st.error(f"连接失败：{exc}")
         if right.button("保存到本次会话", type="primary", use_container_width=True):
-            if use_builtin:
-                st.session_state["llm_settings"] = {}
-                st.success("已回退到系统内置配置。")
-            elif incomplete:
+            if incomplete:
                 st.error("接口地址、API Key、模型名三项都要填。")
             else:
                 st.session_state["llm_settings"] = candidate
+                st.session_state[LLM_SERVER_FLAG] = False   # 页面配置优先,取消服务端来源
                 st.success(f"已生效：{candidate['model']}（仅本次会话）")
 
-        effective = runtime_llm_settings()   # 按钮刚保存过,要读最新值,否则脚注和上面的提示自相矛盾
-        if effective:
-            st.caption(
-                f"当前会话使用**页面填写**的配置：`{effective.get('model')}`"
-                f"（key {len(effective.get('api_key', ''))} 位，不回显）"
-            )
+        # 显式使用服务端 .env(不自动回退,来源可见) —— 自己演示时不用每次开浏览器重填
+        env_ready = bool(os.getenv("MODEL_API_KEY")) and os.getenv("MODEL_PROVIDER", "mock") != "mock"
+        if env_ready:
+            if st.button("载入服务端已配置的 Key（.env）", use_container_width=True):
+                st.session_state[LLM_SERVER_FLAG] = True
+                st.session_state["llm_settings"] = {}
+                st.success("已改用服务端 `.env` 的配置（来源：服务器）。")
         else:
-            st.caption("当前使用服务端内置配置（`.env`）。")
+            st.caption("服务端 `.env` 未配置模型密钥，只能用页面填写的配置。")
+
+        st.caption(
+            f"当前来源：**{llm_source_label()}**"
+            + (f" · `{settings.get('model')}`（key {len(settings.get('api_key', ''))} 位，不回显）"
+               if settings.get("model") else "")
+        )
 
 
 def status_label(status: str) -> str:
@@ -291,11 +310,14 @@ def switch_view(view: str) -> None:
 
 
 def run_selected_task(task: AuditTask) -> AuditTask:
+    if not llm_configured():
+        # 不允许隐式回退到服务端配置或 mock:来源必须明确(页面填写 or 显式载入服务端配置)
+        raise RuntimeError("尚未配置模型 API：请先在左栏「模型 API 设置（必填）」填入 API Key 并保存。")
     report = run_audit(
         [(item.file_name, item.content) for item in task.files],
         field_overrides=task_store.field_overrides(task.task_id),
         task_id=task.task_id,
-        llm_settings=runtime_llm_settings(),   # 侧栏"填空"填的模型配置优先于 .env
+        llm_settings=runtime_llm_settings(),   # 页面填写优先;显式载入服务端配置时为空 dict(即用 .env)
     )
     return task_store.save_report(task.task_id, report)
 
@@ -543,9 +565,11 @@ if "nav_gen" not in st.session_state:
 with st.sidebar:
     st.header("系统运行状态")
     render_llm_settings()
-    st.metric("模型模式", provider_label())
-    if runtime_llm_settings().get("model"):
-        st.caption(f"模型：{runtime_llm_settings()['model']}（本次会话）")
+    st.metric("模型来源", provider_label())
+    _model_name = runtime_llm_settings().get("model") or (
+        os.getenv("MODEL_NAME", "") if st.session_state.get(LLM_SERVER_FLAG) else "")
+    if _model_name:
+        st.caption(f"模型：{_model_name}")
     st.metric("OCR模式", os.getenv("OCR_ENGINE", "mock"))
     st.metric("RAG模式", os.getenv("RAG_MODE", "mock"))
     st.metric("任务存储", os.getenv("AUDIT_TASK_STORE", "sqlite"))
@@ -583,6 +607,14 @@ tasks = task_store.list_tasks()
 demo_notice = demo_mode_notice()
 if demo_notice:
     st.warning(f"⚠️ {demo_notice}", icon="⚠️")
+
+# 没配置模型 API 就不让跑审核(不隐式用服务器 key、也不跑离线模型)
+if not llm_configured():
+    st.warning(
+        "⚠️ 尚未配置模型 API：请在左栏「模型 API 设置（必填）」填入你自己的 API Key，"
+        "点「测试连接」确认可用后再运行审核。",
+        icon="⚠️",
+    )
 
 overview_left, overview_mid, overview_right, overview_fourth = st.columns(4)
 overview_left.metric("任务总数", len(tasks))
@@ -717,7 +749,7 @@ else:
                 hide_index=True,
             )
 
-        run_disabled = not task.files
+        run_disabled = not task.files or not llm_configured()
         if st.button("运行 / 重新运行审核", type="primary", disabled=run_disabled):
             try:
                 task = run_selected_task(task)
@@ -726,5 +758,7 @@ else:
             except (ValueError, RuntimeError) as exc:
                 task_store.save_error(task.task_id, str(exc))
                 st.error(str(exc))
+        if not llm_configured():
+            st.caption("运行前请先在左栏「模型 API 设置（必填）」填入并保存你的 API Key（或显式载入服务端配置）。")
 
         render_report_tabs(task)

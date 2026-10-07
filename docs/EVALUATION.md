@@ -6,6 +6,22 @@
 
 ## 运行方式
 
+评测**默认强制离线**：`OCR_ENGINE=stub`(合成语料引擎)与 `RAG_MODE=mock`(规则匹配基线)。
+这样同一份代码在任何机器上跑出的指标都一致，也不会因为开发者本机 `.env` 配了真实引擎
+（如 `OCR_ENGINE=baidu` / `RAG_MODE=milvus`）而联网、加载 bge-m3、或让基线随本机索引漂移。
+
+要用真实引擎跑评测时显式指定：
+
+```bash
+EVAL_OCR_ENGINE=baidu python -m app.evaluation.runner        # 用真实 OCR
+EVAL_RAG_MODE=milvus python -m app.evaluation.runner         # 用真实向量检索(需已建索引)
+```
+
+一个已知边界：这两个开关是在**当前进程内**临时改环境变量与 `retriever.RAG_MODE` 模块属性。
+工作台（Streamlit）里点「运行评测基线」时评测会在该进程内运行数十秒，**期间排队的审核请求会
+用到 stub/mock 环境**（审核 trace 里的 `rag:` 行与 `readability:` 行会如实记录当时用的引擎）。
+需要严格隔离时，请另起进程跑评测（`python -m app.evaluation.runner`）。
+
 ```bash
 python -m app.evaluation.runner
 python -m app.evaluation.runner --format markdown
@@ -16,7 +32,7 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 发票查重（FR-204）用例依赖登记历史，运行时会自动把 `INVOICE_REGISTRY_PATH` 指向临时文件，保证每次运行都从干净历史开始、结论可复现。
 
-评测语料是**合成文本**（含图片素材的用例也用合成 OCR 文本），因此跑评测时会临时把 `OCR_ENGINE` 设为 `stub`（等价 mock 文本，但按"已识别"对待），避免材料可读性判定把所有图片用例判成"无法判定"；若你已显式配置真实引擎（`tesseract`/`http`/`mineru`/`auto`），评测会沿用你的配置不被覆盖。**评测结果只反映主流程逻辑，不代表真实 OCR 识别能力。**
+评测语料是**合成文本**（含图片素材的用例也用合成 OCR 文本），因此跑评测时会强制把 `OCR_ENGINE` 设为 `stub`、`RAG_MODE` 设为 `mock`（见上文「运行方式」）。想用真实引擎跑评测必须显式设 `EVAL_OCR_ENGINE` / `EVAL_RAG_MODE`。**评测结果只反映主流程逻辑，不代表真实 OCR/检索能力。**
 
 ## 指标
 

@@ -1,7 +1,13 @@
 # RAG 向量检索专用依赖(PRD §23.5 服务拆分)。
-# 主 requirements.txt 不包含这些重型依赖;启用 RAG_MODE=milvus 前先安装:
+# 主 requirements.txt 不含这些重型依赖;要用 RAG_MODE=milvus,就装进**服务进程所用的环境**:
 #   .venv/Scripts/python -m pip install -r requirements-rag.txt
-# 提示:重型依赖建议装在独立虚拟/conda 环境中,不要混进主环境。
-pymilvus>=2.6,<3
+#   Linux/macOS: .venv/bin/python -m pip install -r requirements-rag.txt
+#
+# 注意:
+# - milvus-lite 是"本地数据库文件"模式的必需项(pymilvus 的 extra)。只装 pymilvus 会在
+#   建索引时报 `milvus-lite is required for local database connections`。
+# - bge-m3 权重需自行下载,并用 BGE_MODEL_DIR 指向权重目录(见 docs/RAG_INTEGRATION.md)。
+# - 与 RAG_MODE=local 不同:milvus 模式必须与 API/工作台在同一个 Python 环境里,否则导入失败。
+pymilvus[milvus_lite]>=2.6,<4
 FlagEmbedding>=1.2,<2
 torch>=2.0

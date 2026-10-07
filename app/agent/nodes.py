@@ -13,6 +13,7 @@ from app.models.state import (
 )
 from app.parsers.loader import parse_document
 from app.extraction.field_extractor import extract_fields_with_diagnostics
+from app.rag import retriever as rag_retriever
 from app.rag.retriever import retrieve_policy
 from app.services.injection_guard import detect_injection
 from app.services.material_type import MATERIAL_LABELS, classify_documents, material_check_inputs
@@ -147,6 +148,8 @@ def retrieve(state: dict) -> dict:
                                files=state.get("files"),
                                department=context.get("department"),
                                as_of=context.get("as_of"))
+    # 检索引擎与是否降级必须留在 trace 里:降级到 mock 时结论看起来一样,但依据来源不同
+    note = rag_retriever.RETRIEVAL_NOTE
     record_tool_call(
         state,
         "retrieve_policy",
@@ -155,7 +158,7 @@ def retrieve(state: dict) -> dict:
         [item.chunk_id for item in evidence],
     )
     finish_node(state, "retrieve", started_at, f"检索到{len(evidence)}条制度")
-    return {"policy_evidence": evidence, "trace": state["trace"]}
+    return {"policy_evidence": evidence, "trace": [*state["trace"], f"rag: {note}"]}
 
 
 def plan(state: dict) -> dict:

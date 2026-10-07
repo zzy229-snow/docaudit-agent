@@ -2,9 +2,11 @@
 
 企业报销材料的**可解释审核 Agent**（演示级）：上传发票、付款凭证、审批单（PDF / TXT / DOCX / XLSX / 图片），系统解析或 OCR 后抽取字段，检索制度条款并运行六项确定性检查，输出可解释报告——每条风险都能追溯到字段证据与制度依据。
 
-默认全离线（`MODEL_PROVIDER=mock`、`OCR_ENGINE=mock`、`RAG_MODE=mock`），**不需要 GPU，也不需要任何 API Key**，克隆下来就能跑通完整流程与评测。
+**跑测试与评测不需要任何 Key**（单测进程不读 `.env`，评测强制离线合成语料，克隆下来即可 `python -m unittest discover -s tests` 全绿）。**但工作台不提供离线模式**：要运行审核，必须由使用者提供自己的模型 API Key（界面填写，或显式载入服务端 `.env` 的配置）。
 
-> 定位：这是**可解释的演示基线**，不是能直接上线的财务系统。真实投产还需接真实 OCR/模型、外部数据库与权限体系等，见「当前限制」。
+`config/环境变量` 的推荐组合是**真实引擎**（见 `.env.example`）：本地 MinerU 识别图片（免费、离线，发票不出内网）+ bge-m3/Milvus 做制度向量检索 + 你自己的 OpenAI 兼容模型 API。
+
+> 定位：这是**可解释的演示基线**，不是能直接上线的财务系统。真实投产还需外部数据库与完整权限体系等，见「当前限制」。
 
 ## 快速开始
 
@@ -19,10 +21,12 @@ pip install -r requirements.txt
 streamlit run streamlit_app.py          # 审核工作台 http://127.0.0.1:8500
 ```
 
-跑一遍回归测试确认环境正常：
+工作台上要**先填模型 API Key**：侧栏「模型 API 设置（必填）」→ 选供应商（默认 DeepSeek 官方，地址与模型名自动带出）→ 填 Key → `测试连接` → `保存到本次会话`，之后"运行审核"才可点（不配置就不放行，避免隐式使用服务器内置配置）。
+
+跑一遍回归测试确认环境正常（**测试离线，不需要任何 Key**）：
 
 ```bash
-python -m unittest discover -s tests    # 338 例,全离线,约 30 秒
+python -m unittest discover -s tests    # 339 例,全离线,约 25 秒
 ```
 
 一键启动（含依赖安装与就绪检查）：`bash scripts/start.sh`（Windows：`scripts\start.bat`），
@@ -46,7 +50,7 @@ python -m uvicorn app.api.main:app --reload --port 8102
 - 六项确定性审核：必备材料、金额一致性、日期范围、住宿标准、主体一致性、重复发票查重。
 - 材料可读性判定：材料没被真正识别（演示引擎文本、解析为空、抽不到任何字段）时**不给结论**，任务状态为 `UNDETERMINED`（无法判定），只保留一条 `MATERIAL_UNREADABLE` 风险并说明改法 —— 避免"上传 A 发票、结论却是 B 发票"的误导。结论状态：`PASS` / `REVIEW_REQUIRED` / `UNDETERMINED` / `FAILED`。
 - **本地离线识别（`OCR_ENGINE=mineru`）**：接本地 MinerU（免费、离线，发票不出内网），实测同一张测试票识别质量与云端发票接口口径一致（代码/号码/日期/价税合计/购买方），常驻服务下单张 18~28 秒（不起常驻则约 115 秒）；引擎内置输出归一化（表格逐格换行、去标签、还 HTML 实体）并修掉签章栏误抽主体、日期未规范化、购买方抽不到三个真实票面问题。参见 `docs/OCR_INTEGRATION.md` §4.2。
-- **模型 API 界面填空**：交付时不留内置密钥 —— 侧栏「模型 API 设置（填空）」选供应商、填客户自己的 API Key，`测试连接` 当场验证（失败原样回显模型返回原因），`保存到本次会话` 立即生效；配置只存浏览器会话（不落盘、不改 `.env`），且只影响工作台进程（`/api/v1` 仍读服务端 `.env`）。实现走 `run_audit(..., llm_settings=...)` 参数而非进程环境变量。参见 `docs/MODEL_GATEWAY.md` §5。
+- **模型 API 界面填空（无离线选项）**：工作台不内置密钥、也不提供离线模式 —— 侧栏「模型 API 设置（必填）」选供应商（默认 DeepSeek 官方）、填自己的 API Key，`测试连接` 当场验证（失败原样回显模型返回原因），`保存到本次会话` 后"运行审核"才可点。想用服务器 `.env` 的配置必须显式点「载入服务端已配置的 Key」，来源在界面上明示。配置只存浏览器会话（不落盘、不改进程环境变量），实现走 `run_audit(..., llm_settings=...)` 参数。参见 `docs/MODEL_GATEWAY.md` §5。
 - 发票 OCR 接入：`OCR_ENGINE=http` 支持两种接口形态 —— 返回整段文本（`OCR_HTTP_TEXT_PATH`）或**直接返回结构化字段**（`OCR_HTTP_FIELDS_PATH` + `OCR_HTTP_FIELD_MAP`，发票专用接口推荐），结构化字段优先级高于版式正则、冲突写进 trace；百度智能云增值税发票识别内置为 `OCR_ENGINE=baidu`（token 自动换发/缓存/失效重试）；`scripts/check_ocr_http.py` 可一条命令验证接口（详见 `docs/OCR_INTEGRATION.md`）。
 - 材料类型按票面内容判定：发票/付款凭证/审批单靠票面信号识别（发票号码、价税合计、付款金额、流水号、审批意见…），文件名只在内容判不出时兜底 —— 上传「微信图片_2026.png」也不会被算成缺少发票。
 - 风险等级口径：`AMOUNT_MATCH`（金额不一致，HIGH）与 `AMOUNT_UNVERIFIABLE`（金额字段缺失、无法核对，MEDIUM）分开，缺字段不再被算成"金额不符"。
@@ -83,17 +87,31 @@ python -m app.services.model_smoke
 
 ## 真实 OCR
 
-默认 `OCR_ENGINE=mock` 只适合本地测试。生产化演示可以切换为：
+推荐 **本地 MinerU**（免费、离线、发票不出内网），`.env.example` 里就是这个默认值；需要你已安装 MinerU 并配好 `MINERU_EXE` / `MODELSCOPE_CACHE`，建议同时起常驻服务（`scripts/start_mineru_api.bat` + `MINERU_API_URL`，实测单张 18~28 秒，不起常驻约 115 秒/张）。
 
-- `OCR_ENGINE=tesseract`：本机 Tesseract OCR；
-- `OCR_ENGINE=http`：百度/阿里/腾讯/自研 OCR HTTP 服务；
-- `OCR_ENGINE=mineru`：扫描 PDF 和复杂版面解析。
+其它可选引擎：
+
+- `OCR_ENGINE=tesseract`：本机 Tesseract OCR（需自行下载中文语言包，见上文）；
+- `OCR_ENGINE=http`：自建/第三方 OCR HTTP 服务（可返回结构化字段）；
+- `OCR_ENGINE=baidu`：百度智能云增值税发票识别（云端，发票会离开本机，注意合规）；
+- `OCR_ENGINE=mock`：**仅用于离线测试**，不识别真实图片（工作台上传图片会得到"无法判定"而不是假结论）。
 
 配置方式见 `docs/OCR_INTEGRATION.md`。
 
 ## 真实 RAG
 
-默认 `RAG_MODE=mock` 适合离线测试。生产化演示建议切换到 `RAG_MODE=local`，系统会从 `data/policies` 的制度切片中进行本地真实检索；如果已经准备好 bge-m3 和 Milvus Lite，也可以使用 `RAG_MODE=milvus`。配置和评测方式见 `docs/RAG_INTEGRATION.md`。
+推荐 **`RAG_MODE=milvus`**（bge-m3 稠密向量检索）：
+
+```bash
+pip install -r requirements-rag.txt      # 含 milvus-lite(本地库文件模式必需)
+BGE_MODEL_DIR=<bge-m3 权重目录> python -m app.rag.build_index
+```
+
+未建索引或检索失败时会**降级到规则匹配**——降级原因会写进审核 trace 的 `rag:` 行，不会悄悄改变结论来源。
+
+其它选项：`RAG_MODE=local`（只用仓库内制度切片做本地检索，零额外依赖）、`RAG_MODE=mock`（规则匹配基线）。融合方式默认**只用稠密通道**（依据见 `app/rag/vector_store.py` 的 `SPARSE_WEIGHT_ENV` 注释），需要精确词命中时可设 `RAG_SPARSE_WEIGHT>0` 打开稠密+稀疏加权融合。
+
+配置与评测方式见 `docs/RAG_INTEGRATION.md`。
 
 ## 测试
 
