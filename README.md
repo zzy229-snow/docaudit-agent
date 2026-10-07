@@ -154,4 +154,5 @@ python -m app.evaluation.runner --format markdown --output reports/eval-report.m
 
 - 贡献方式、开发约定与提交前检查见 `CONTRIBUTING.md`。
 - 许可证：**Apache-2.0**（见 `LICENSE`）。使用时请保留版权与许可声明。
+- 版权：Copyright 2026 zzy229-snow and contributors。
 - 本项目只处理虚构/脱敏样例；请勿提交真实发票、真实税号、真实公司名或任何密钥。
