@@ -156,7 +156,12 @@ def retrieve_policy(city: str | None, query: str | None = None,
         try:
             global LAST_RERANK_LABEL
             LAST_RERANK_LABEL = ""  # 防止上一次调用的标签残留到这次 trace
-            evidence = _retrieve_milvus(query or city or "", expense_type, department, city)
+            # 查询文本与 local 路径保持一致:只给城市时必须展开成可检索的问句。
+            # 踩过的坑:这里原来传的是 `query or city`,于是送进向量/交叉编码器的就是光秃秃的
+            # "上海"两个字 —— 向量侧排错(把"其他城市 450"排前),交叉编码器更是打成噪声级
+            # (0.0081 vs 0.0076),最终把上海的住宿上限算成 450 元(应为一线城市 600)。
+            query_text = query or _query_from_city(city)
+            evidence = _retrieve_milvus(query_text, expense_type, department, city)
             note = f"milvus(融合={_fusion_label()}"
             if LAST_RERANK_LABEL:
                 note += f",重排={LAST_RERANK_LABEL}"

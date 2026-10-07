@@ -148,6 +148,16 @@ def entity_rank(evidence: list[PolicyEvidence], query: str, city: str | None) ->
     return sorted(evidence, key=rank)
 
 
+def query_is_informative(query: str, min_chars: int = 4) -> bool:
+    """查询文本是否有足够信息量让交叉编码器打分。
+
+    实测(2026-10-07):查询只有"上海"两个字时,交叉编码器给 TA 条款打 0.0081、给"其他城市"
+    条款打 0.0076 —— 差距 0.0005,纯噪声,却足以把正确条款挤到第 2 名,导致上海的住宿上限
+    按"其他城市 450"计算。信息量不足时直接跳过这一层,用实体重排的顺序。
+    """
+    return sum(1 for ch in (query or "") if ch.isalnum()) >= min_chars
+
+
 def cross_encoder_scores(query: str, evidence: list[PolicyEvidence],
                          reranker=None) -> list[float] | None:
     """用交叉编码器给候选打分;不可用或失败时返回 ``None``。"""
@@ -178,20 +188,24 @@ def rerank(query: str, evidence: list[PolicyEvidence], city: str | None = None,
 
     result = entity_rank(evidence, query, city)
     label = "实体"
-    reranker = get_reranker()
 
-    if reranker is not None:
-        scores = cross_encoder_scores(query, result, reranker=reranker)
-        if scores is not None:
-            order = sorted(range(len(result)), key=lambda i: (-scores[i], i))
-            result = [result[i] for i in order]
-            name = Path(_RERANKER_PATH).name if _RERANKER_PATH else "交叉编码器"
-            label = f"实体+{name}"
-        else:
-            label = "实体(交叉编码器打分失败)"
-    elif _RERANKER_ERROR:
-        # 标签要短(trace 一行),详细原因放 reranker_status() / 文档
-        label = "实体(交叉编码器不可用)"
+    if not query_is_informative(query):
+        # 查询信息量不足时,交叉编码器的打分是噪声(实测差 0.0005),不能让它决定排序
+        label = "实体(查询信息量不足,跳过交叉编码器)"
+    else:
+        reranker = get_reranker()
+        if reranker is not None:
+            scores = cross_encoder_scores(query, result, reranker=reranker)
+            if scores is not None:
+                order = sorted(range(len(result)), key=lambda i: (-scores[i], i))
+                result = [result[i] for i in order]
+                name = Path(_RERANKER_PATH).name if _RERANKER_PATH else "交叉编码器"
+                label = f"实体+{name}"
+            else:
+                label = "实体(交叉编码器打分失败)"
+        elif _RERANKER_ERROR:
+            # 标签要短(trace 一行),详细原因放 reranker_status() / 文档
+            label = "实体(交叉编码器不可用)"
 
     if top_k is not None:
         result = result[:top_k]

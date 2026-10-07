@@ -72,6 +72,38 @@ class _BoomReranker:
         raise RuntimeError("模型炸了")
 
 
+class QueryInformativenessTests(unittest.TestCase):
+    """查询信息量不足时要跳过交叉编码器(实测噪声级打分反而会排错)。"""
+
+    def test_short_query_is_not_informative(self):
+        for q in ("", None, " ", "上海", "沪", "?"):
+            self.assertFalse(rerank.query_is_informative(q), q)
+
+    def test_normal_query_is_informative(self):
+        for q in ("上海住宿标准", "住宿费能报多少钱", "北京 住宿标准 差旅"):
+            self.assertTrue(rerank.query_is_informative(q), q)
+
+    def test_short_query_skips_cross_encoder_and_keeps_entity_order(self):
+        """关键:"上海"这种短查询不得让交叉编码器插手排序。"""
+        calls = []
+
+        class _SpyReranker:
+            def compute_score(self, pairs, normalize=True):
+                calls.append(pairs)
+                return [0.0] * len(pairs)   # 若被调用会把顺序打乱(全部同分→保持入参顺序)
+
+        saved = rerank.get_reranker
+        rerank.get_reranker = lambda: _SpyReranker()
+        try:
+            result, label = rerank.rerank("上海", [OTHER_B, TIER_A], city="上海", top_k=2)
+        finally:
+            rerank.get_reranker = saved
+
+        self.assertEqual([], calls, "信息量不足的查询不该调用交叉编码器")
+        self.assertEqual("TRAVEL-V1-4.2-A", result[0].chunk_id)
+        self.assertIn("信息量不足", label)
+
+
 class RerankPipelineTests(unittest.TestCase):
     def setUp(self):
         rerank.reset_reranker()
