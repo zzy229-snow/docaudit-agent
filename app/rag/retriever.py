@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 from app.config import load_environment
@@ -33,6 +34,13 @@ LAST_RERANK_LABEL = ""
 
 #: 送进重排的候选条款数(重排要有腾挪空间:只取 2 条则排序问题无从修正)
 _CANDIDATES = 6
+
+#: 条款编号引用:完整编号(字母+连字符,如 TRAVEL-V1-4.2)或小节号(4.2/4.2.1)。
+#: 小节号首段限 3 位,且两侧加边界断言 —— 否则 "2026.8.1" 会被匹配出 "026.8.1"(实测算过)。
+_REFERENCE_PATTERN = re.compile(
+    r"([A-Za-z]{2,}-[A-Za-z0-9]+(?:[.\-][A-Za-z0-9]+)*)"
+    r"|(?<![\d.])(\d{1,3}(?:\.\d{1,3}){1,2})(?![\d.])"
+)
 
 
 def set_retrieval_note(text: str) -> None:
@@ -122,7 +130,8 @@ def _local_evidence(query: str, city: str | None, expense_type: str | None,
 
 def retrieve_policy(city: str | None, query: str | None = None,
                     expense_type: str | None = None, department: str | None = None,
-                    files=None, as_of: str | None = None) -> list[PolicyEvidence]:
+                    files=None, as_of: str | None = None,
+                    mode: str | None = None, note_sink: list[str] | None = None) -> list[PolicyEvidence]:
     """按城市(或自由文本 query)检索制度,支持元数据过滤(任务⑥/FR-304)。
 
     - expense_type: 费用类型(TRAVEL/EXPENSE/MEDICAL/PURCHASE);
@@ -143,16 +152,25 @@ def retrieve_policy(city: str | None, query: str | None = None,
     if not expense_type:
         expense_type = "TRAVEL"
 
-    if RAG_MODE == "local":
+    effective_mode = (mode if mode is not None else RAG_MODE).strip().lower()
+    if effective_mode == "auto":
+        effective_mode = RAG_MODE
+
+    def record_note(text: str) -> None:
+        set_retrieval_note(text)
+        if note_sink is not None:
+            note_sink[:] = [text]
+
+    if effective_mode == "local":
         try:
             evidence = _local_evidence(query, city, expense_type, department, as_of)
-            set_retrieval_note(f"local(本地切片检索,命中{len(evidence)}条)")
+            record_note(f"local(本地切片检索,命中{len(evidence)}条)")
             return evidence
         except Exception as exc:  # noqa: BLE001 — 检索失败必须降级不可中断主流程
-            set_retrieval_note(f"local 检索失败，已降级 mock:{_degrade_reason(exc)}")
+            record_note(f"local 检索失败，已降级 mock:{_degrade_reason(exc)}")
             print(f"[rag] local 检索失败,降级 mock: {exc!r}")
             return _retrieve_mock(city, expense_type, department, as_of)
-    if RAG_MODE == "milvus":
+    if effective_mode == "milvus":
         try:
             global LAST_RERANK_LABEL
             LAST_RERANK_LABEL = ""  # 防止上一次调用的标签残留到这次 trace
@@ -165,21 +183,21 @@ def retrieve_policy(city: str | None, query: str | None = None,
             note = f"milvus(融合={_fusion_label()}"
             if LAST_RERANK_LABEL:
                 note += f",重排={LAST_RERANK_LABEL}"
-            set_retrieval_note(note + f",命中{len(evidence)}条)")
+            record_note(note + f",命中{len(evidence)}条)")
             return evidence
         except Exception as exc:  # noqa: BLE001
             reason = _degrade_reason(exc)
             try:
                 evidence = _local_evidence(query, city, expense_type, department, as_of)
-                set_retrieval_note(f"milvus 检索失败，已降级 local(关键词检索):{reason}")
+                record_note(f"milvus 检索失败，已降级 local(关键词检索):{reason}")
                 print(f"[rag] milvus 检索失败,降级 local: {exc!r}")
                 return evidence
             except Exception as exc2:  # noqa: BLE001 — 最后一层兜底
-                set_retrieval_note(
+                record_note(
                     f"milvus 检索失败，已降级 mock:{reason};local 亦失败:{_degrade_reason(exc2)}")
                 print(f"[rag] milvus/local 均失败,降级 mock: {exc!r} / {exc2!r}")
                 return _retrieve_mock(city, expense_type, department, as_of)
-    set_retrieval_note("mock(规则匹配，未使用向量检索)")
+    record_note("mock(规则匹配，未使用向量检索)")
     return _retrieve_mock(city, expense_type, department, as_of)
 
 
@@ -279,6 +297,31 @@ def _content_matches_expense(content: str, expense_type: str) -> bool:
     return True
 
 
+def _reference_tokens(query: str) -> list[str]:
+    """从查询里提取"条款编号引用"。
+
+    两类写法都要认:
+    - 完整编号:TRAVEL-V1-4.2 / EXP-V1-4.5(字母 + 连字符);
+    - 小节号:4.2 / 4.2.1(点分数字,**首段最多 3 位** —— 这样 "2026.8.1" 这种日期不会被误判)。
+    """
+    found = []
+    for m in _REFERENCE_PATTERN.finditer(query or ""):
+        token = (m.group(1) or m.group(2) or "").strip()
+        if token and token.upper() not in {t.upper() for t in found}:
+            found.append(token)
+    return found
+
+
+def _exact_reference_hits(store, tokens: list[str], limit: int = 2) -> list[PolicyEvidence]:
+    """按编号精确取回条款(编号在元数据里,确定性匹配,不走向量相似度)。"""
+    if not tokens:
+        return []
+    upper = [t.upper() for t in tokens]
+    matched = [cid for cid in store.all_chunk_ids()
+               if any(t in cid.upper() for t in upper)]
+    return store.fetch_by_ids(matched[:limit]) if matched else []
+
+
 def _retrieve_milvus(query: str, expense_type: str | None = None,
                      department: str | None = None, city: str | None = None) -> list[PolicyEvidence]:
     """Milvus 检索:编码查询 → 稠密(可选+稀疏加权) → 元数据过滤 → 重排(任务⑥)。
@@ -288,12 +331,23 @@ def _retrieve_milvus(query: str, expense_type: str | None = None,
 
     候选池取 ``_CANDIDATES`` 条后交给 ``rerank`` 重排再截断:只取 2 条的话重排没有腾挪空间,
     "上海住宿标准"这类实体张冠李戴的排序问题就修不掉。
+
+    **编号引用优先走精确匹配**:查询里出现条款编号(``4.2`` / ``TRAVEL-V1-4.2``)时,先按元数据
+    取回对应条款并置顶 —— 实测这类查询在稠密向量侧根本召回不出来(候选池里没有目标条款,
+    重排也无从挽救),而编号本来就是确定性的元数据,不该赌相似度。
     """
     global LAST_RERANK_LABEL
 
     from .embedding import encode_query, get_model
     from .rerank import rerank
     from .vector_store import get_store
+
+    store = get_store()
+    exact = _exact_reference_hits(store, _reference_tokens(query))
+    if len(exact) >= 2:
+        # 已经够 2 条:不做没有意义的向量检索与重排(省一次编码 + 一次重排,约 1.7 秒)
+        LAST_RERANK_LABEL = f"编号精确命中{len(exact)}条"
+        return exact[:2]
 
     dense, sparse = encode_query(get_model(), query)
 
@@ -305,8 +359,14 @@ def _retrieve_milvus(query: str, expense_type: str | None = None,
         clauses.append(f'department == "{department}"')
     filter_expr = " && ".join(clauses) if clauses else ""
 
-    candidates = get_store().hybrid_search(dense_vec=dense, sparse_vec=sparse,
-                                           limit=_CANDIDATES, filters=filter_expr)
+    candidates = store.hybrid_search(dense_vec=dense, sparse_vec=sparse,
+                                     limit=_CANDIDATES, filters=filter_expr)
     evidence, label = rerank(query, candidates, city=city, top_k=2)
+
+    if exact:
+        # 精确命中的编号条款置顶,其余用语义检索结果补齐(去重)
+        known = {item.chunk_id for item in exact}
+        evidence = [*exact, *(item for item in evidence if item.chunk_id not in known)][:2]
+        label = f"编号精确命中{len(exact)}条+{label}"
     LAST_RERANK_LABEL = label
     return evidence

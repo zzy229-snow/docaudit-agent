@@ -42,9 +42,11 @@ class VectorStore:
         from pymilvus import MilvusClient
 
         self.uri = uri or os.environ.get("MILVUS_URI", str(Path(__file__).resolve().parents[2] / "data" / "rag" / "policy.db"))
-        Path(self.uri).parent.mkdir(parents=True, exist_ok=True)
+        if "://" not in self.uri:
+            Path(self.uri).parent.mkdir(parents=True, exist_ok=True)
         self.collection = collection
         self.client = MilvusClient(uri=self.uri)
+        self._chunk_ids: list[str] | None = None   # all_chunk_ids() 的进程内缓存
         self._ensure_collection()
 
     def _ensure_collection(self) -> None:
@@ -74,11 +76,41 @@ class VectorStore:
 
     def insert(self, rows: list[dict]) -> int:
         self.client.insert(self.collection, rows)
+        self._chunk_ids = None       # 新插入后编号集合可能变化
         return self.client.get_collection_stats(self.collection).get("row_count", 0)
 
     def clear(self) -> None:
         self.client.drop_collection(self.collection)
+        self._chunk_ids = None       # 编号缓存随索引重建失效
         self._ensure_collection()
+
+    def all_chunk_ids(self) -> list[str]:
+        """collection 内全部 ``chunk_id``(进程内缓存)。
+
+        用途:编号类查询("4.2 条怎么规定的"、"TRAVEL-V1-4.2 说了什么")需要**确定性**命中 ——
+        稠密向量对此无能为力(实测候选池里根本没有目标条款),而编号本来就存在元数据里,
+        直接过滤即可,不必赌相似度。
+        """
+        if self._chunk_ids is None:
+            rows = self.client.query(collection_name=self.collection, filter="pk >= 0",
+                                     output_fields=["chunk_id"], limit=16384)
+            self._chunk_ids = sorted({str(r.get("chunk_id", "")) for r in rows if r.get("chunk_id")})
+        return list(self._chunk_ids)
+
+    def fetch_by_ids(self, chunk_ids: list[str]) -> list[PolicyEvidence]:
+        """按 ``chunk_id`` 精确取回条款(不走向量检索)。"""
+        if not chunk_ids:
+            return []
+        expr = "chunk_id in [" + ", ".join(f'"{c}"' for c in chunk_ids) + "]"
+        rows = self.client.query(collection_name=self.collection, filter=expr,
+                                 output_fields=["chunk_id", "section_path", "content"],
+                                 limit=len(chunk_ids))
+        by_id = {str(r.get("chunk_id", "")): r for r in rows}
+        return [
+            PolicyEvidence(chunk_id=cid, section=str(by_id[cid].get("section_path", "")),
+                           content=str(by_id[cid].get("content", "")), score=0.0)
+            for cid in chunk_ids if cid in by_id
+        ]
 
     def hybrid_search(
         self,

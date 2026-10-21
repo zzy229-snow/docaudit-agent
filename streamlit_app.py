@@ -101,8 +101,8 @@ def provider_label() -> str:
 
 
 # ---------------- 模型 API 填空 ----------------
-#: 上线交付时客户拿到的是"填空",不内置我们的 key,也不给离线选项。
-#: 默认即 DeepSeek 官方:填 key → 测试连接 → 保存到本次会话,才能运行审核。
+#: 模型仅用于补充字段抽取,不是运行审核的前置条件。
+#: 用户可配置 OpenAI 兼容 API,或只使用 OCR/规则抽取运行审核。
 LLM_PRESETS: dict[str, tuple[str, str]] = {
     "DeepSeek 官方": ("https://api.deepseek.com/v1", "deepseek-chat"),
     "OpenAI 兼容（自定义地址）": ("", ""),
@@ -121,11 +121,7 @@ def runtime_llm_settings() -> dict:
 
 
 def llm_configured() -> bool:
-    """是否具备可用的模型配置。
-
-    工作台**不再隐式回退**到服务端 ``.env``(否则会出现"页面没填也能跑",来源不可见);
-    想用服务端配置必须显式点「载入服务端已配置的 Key」。
-    """
+    """是否显式启用了真实模型,用于展示配置来源而非阻断审核。"""
     return bool(runtime_llm_settings().get("api_key")) or bool(st.session_state.get(LLM_SERVER_FLAG))
 
 
@@ -141,10 +137,10 @@ def llm_source_label() -> str:
 
 def render_llm_settings() -> None:
     settings = runtime_llm_settings()
-    with st.expander("模型 API 设置（必填）", expanded=not llm_configured()):
+    with st.expander("字段抽取模型（可选）", expanded=False):
         st.caption(
-            "工作台**不内置密钥、也不跑离线模型**：请填你自己的模型 API Key。"
-            "只作用于当前浏览器会话，不写入磁盘。（接口 `/api/v1` 服务端另有自己的 `.env`）"
+            "仅用于补充 OCR/规则未提取出的字段，不决定审核结论。未配置时仍可运行审核；"
+            "配置只作用于当前浏览器会话，不写入磁盘。（接口 `/api/v1` 服务端另有自己的 `.env`）"
         )
         names = list(LLM_PRESETS)
         preset = st.selectbox("供应商", names)
@@ -207,6 +203,35 @@ def render_llm_settings() -> None:
             + (f" · `{settings.get('model')}`（key {len(settings.get('api_key', ''))} 位，不回显）"
                if settings.get("model") else "")
         )
+
+
+OCR_MODE_OPTIONS = {
+    "自动选择（推荐）": "auto", "本地 Tesseract（离线）": "tesseract",
+    "MinerU（复杂版面）": "mineru", "企业 HTTP OCR": "http",
+    "百度发票识别": "baidu", "演示模式（不识别图片）": "mock",
+}
+RAG_MODE_OPTIONS = {
+    "自动降级（推荐）": "auto", "本地关键词检索": "local",
+    "Milvus 向量检索": "milvus", "演示基线": "mock",
+}
+
+def runtime_document_modes() -> tuple[str, str]:
+    return st.session_state.get("ocr_mode", "auto"), st.session_state.get("rag_mode", "auto")
+
+def render_document_mode_settings() -> None:
+    with st.expander("OCR 与制度检索（按本次会话选择）", expanded=False):
+        st.caption("自动模式沿用服务端默认配置；手动覆盖只作用于当前浏览器会话，不修改服务器环境变量。")
+        ocr_label = st.selectbox("OCR 模式", list(OCR_MODE_OPTIONS), key="ocr_mode_label")
+        rag_label = st.selectbox("RAG 模式", list(RAG_MODE_OPTIONS), key="rag_mode_label")
+        st.session_state["ocr_mode"] = OCR_MODE_OPTIONS[ocr_label]
+        st.session_state["rag_mode"] = RAG_MODE_OPTIONS[rag_label]
+        ocr = st.session_state["ocr_mode"]
+        rag = st.session_state["rag_mode"]
+        st.caption(f"当前会话：OCR={os.getenv('OCR_ENGINE', 'mock') if ocr == 'auto' else ocr} · RAG={os.getenv('RAG_MODE', 'mock') if rag == 'auto' else rag}")
+        if ocr in {"http", "baidu"}:
+            st.caption("该模式会把材料发送到配置的 OCR 服务，请确认企业合规要求。")
+        if rag == "milvus":
+            st.caption("Milvus 不可用时会按现有链路降级到本地检索或演示基线。")
 
 
 def status_label(status: str) -> str:
@@ -310,14 +335,18 @@ def switch_view(view: str) -> None:
 
 
 def run_selected_task(task: AuditTask) -> AuditTask:
-    if not llm_configured():
-        # 不允许隐式回退到服务端配置或 mock:来源必须明确(页面填写 or 显式载入服务端配置)
-        raise RuntimeError("尚未配置模型 API：请先在左栏「模型 API 设置（必填）」填入 API Key 并保存。")
+    settings = runtime_llm_settings()
+    if not settings and not st.session_state.get(LLM_SERVER_FLAG):
+        # 未显式启用模型时强制 mock,不隐式使用服务器 .env 中可能存在的 Key。
+        settings = {"provider": "mock"}
+    ocr_mode, rag_mode = runtime_document_modes()
     report = run_audit(
         [(item.file_name, item.content) for item in task.files],
         field_overrides=task_store.field_overrides(task.task_id),
         task_id=task.task_id,
-        llm_settings=runtime_llm_settings(),   # 页面填写优先;显式载入服务端配置时为空 dict(即用 .env)
+        llm_settings=settings,   # 空 dict 仅用于用户显式载入服务端配置
+        ocr_mode=ocr_mode,
+        rag_mode=rag_mode,
     )
     return task_store.save_report(task.task_id, report)
 
@@ -565,13 +594,15 @@ if "nav_gen" not in st.session_state:
 with st.sidebar:
     st.header("系统运行状态")
     render_llm_settings()
+    render_document_mode_settings()
     st.metric("模型来源", provider_label())
     _model_name = runtime_llm_settings().get("model") or (
         os.getenv("MODEL_NAME", "") if st.session_state.get(LLM_SERVER_FLAG) else "")
     if _model_name:
         st.caption(f"模型：{_model_name}")
-    st.metric("OCR模式", os.getenv("OCR_ENGINE", "mock"))
-    st.metric("RAG模式", os.getenv("RAG_MODE", "mock"))
+    _ocr_mode, _rag_mode = runtime_document_modes()
+    st.metric("OCR模式", os.getenv("OCR_ENGINE", "mock") if _ocr_mode == "auto" else _ocr_mode)
+    st.metric("RAG模式", os.getenv("RAG_MODE", "mock") if _rag_mode == "auto" else _rag_mode)
     st.metric("任务存储", os.getenv("AUDIT_TASK_STORE", "sqlite"))
     if is_synthetic_engine():
         st.caption("⚠️ OCR模式=mock 表示不识别图片/扫描件，上传这类材料会得到“无法判定”。")
@@ -608,13 +639,9 @@ demo_notice = demo_mode_notice()
 if demo_notice:
     st.warning(f"⚠️ {demo_notice}", icon="⚠️")
 
-# 没配置模型 API 就不让跑审核(不隐式用服务器 key、也不跑离线模型)
+# 模型API可选;未配置时走OCR/规则抽取,不隐式使用服务端 .env
 if not llm_configured():
-    st.warning(
-        "⚠️ 尚未配置模型 API：请在左栏「模型 API 设置（必填）」填入你自己的 API Key，"
-        "点「测试连接」确认可用后再运行审核。",
-        icon="⚠️",
-    )
+    st.info("未启用字段抽取模型：审核将使用 OCR 结构化字段和规则抽取；字段不足时会转人工复核或无法判定。")
 
 overview_left, overview_mid, overview_right, overview_fourth = st.columns(4)
 overview_left.metric("任务总数", len(tasks))
@@ -749,7 +776,7 @@ else:
                 hide_index=True,
             )
 
-        run_disabled = not task.files or not llm_configured()
+        run_disabled = not task.files
         if st.button("运行 / 重新运行审核", type="primary", disabled=run_disabled):
             try:
                 task = run_selected_task(task)
@@ -759,6 +786,6 @@ else:
                 task_store.save_error(task.task_id, str(exc))
                 st.error(str(exc))
         if not llm_configured():
-            st.caption("运行前请先在左栏「模型 API 设置（必填）」填入并保存你的 API Key（或显式载入服务端配置）。")
+            st.caption("模型API为可选项；关键字段抽取不足时，可在左侧配置模型，或通过字段修正补录后重新审核。")
 
         render_report_tabs(task)

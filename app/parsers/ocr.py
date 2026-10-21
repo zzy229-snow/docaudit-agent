@@ -530,9 +530,9 @@ class RoutingOcrEngine(OcrEngine):
         raise RuntimeError("所有 OCR 引擎均失败: " + "; ".join(errors))
 
 
-def get_ocr_engine() -> OcrEngine:
-    """工厂:按 OCR_ENGINE 返回 OCR 实例(PRD §8.2 模型路由)。"""
-    mode = os.environ.get("OCR_ENGINE", "mock").strip().lower()
+def get_ocr_engine(mode: str | None = None) -> OcrEngine:
+    """工厂:按运行时模式或 OCR_ENGINE 返回 OCR 实例(PRD §8.2 模型路由)。"""
+    mode = (mode if mode is not None else os.environ.get("OCR_ENGINE", "mock")).strip().lower()
     if mode == "baidu":
         # 百度智能云 增值税发票识别:API Key + Secret Key 换 token,结构化字段返回
         return BaiduVatInvoiceOcrEngine(

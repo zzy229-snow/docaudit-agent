@@ -12,6 +12,7 @@ from app.models.state import (
     start_node,
 )
 from app.parsers.loader import parse_document
+from app.parsers.ocr import get_ocr_engine
 from app.extraction.field_extractor import extract_fields_with_diagnostics
 from app.rag import retriever as rag_retriever
 from app.rag.retriever import retrieve_policy
@@ -47,8 +48,13 @@ def parse_documents(state: dict) -> dict:
     started_at = start_node(state, "parse_documents", "开始解析上传材料")
     # 发票专用 OCR 接口返回的结构化字段在解析时收集(见 loader.parse_document 的 field_sink)
     ocr_fields: dict[str, str] = {}
-    documents = [parse_document(name, content, field_sink=ocr_fields)
+    ocr_mode = state.get("ocr_mode") or "auto"
+    ocr_engine = None if ocr_mode == "auto" else get_ocr_engine(ocr_mode)
+    documents = [parse_document(name, content, ocr_engine=ocr_engine, field_sink=ocr_fields)
                  for name, content in state["files"]]
+    state.setdefault("trace", []).append(
+        f"ocr: {ocr_mode if ocr_mode != 'auto' else os.environ.get('OCR_ENGINE', 'mock')}"
+    )
     # 任务④:收集 OCR 困难区域(手写/低质),供后续标记人工复核
     hard_regions = []
     for doc in documents:
@@ -144,12 +150,16 @@ def retrieve(state: dict) -> dict:
     started_at = start_node(state, "retrieve", "开始检索制度证据")
     city = state["fields"].get("travel_city")
     context = state.get("user_context") or {}
+    rag_note: list[str] = []
+    rag_mode = state.get("rag_mode") or "auto"
     evidence = retrieve_policy(str(city.value) if city else None,
                                files=state.get("files"),
                                department=context.get("department"),
-                               as_of=context.get("as_of"))
+                               as_of=context.get("as_of"),
+                               mode=None if rag_mode == "auto" else rag_mode,
+                               note_sink=rag_note)
     # 检索引擎与是否降级必须留在 trace 里:降级到 mock 时结论看起来一样,但依据来源不同
-    note = rag_retriever.RETRIEVAL_NOTE
+    note = rag_note[0] if rag_note else rag_retriever.RETRIEVAL_NOTE
     record_tool_call(
         state,
         "retrieve_policy",

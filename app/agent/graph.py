@@ -34,6 +34,8 @@ def run_audit(
     department: str | None = None,
     as_of: str | None = None,
     llm_settings: dict | None = None,
+    ocr_mode: str | None = None,
+    rag_mode: str | None = None,
 ) -> AuditReport:
     """执行一次完整审核。
 
@@ -46,6 +48,7 @@ def run_audit(
     state = pipeline.prepare_state(
         files, max_steps=max_steps, field_overrides=field_overrides, task_id=task_id,
         department=department, as_of=as_of, llm_settings=llm_settings,
+        ocr_mode=ocr_mode, rag_mode=rag_mode,
     )
     engine = resolve_engine()
     if engine == "langgraph":

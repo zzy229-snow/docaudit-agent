@@ -62,6 +62,8 @@ def prepare_state(
     department: str | None = None,
     as_of: str | None = None,
     llm_settings: dict | None = None,
+    ocr_mode: str | None = None,
+    rag_mode: str | None = None,
 ) -> dict:
     """构造初始审核状态(§7.3 AuditState)。
 
@@ -84,6 +86,8 @@ def prepare_state(
         "human_review_items": [],
         "field_overrides": field_overrides or {},
         "llm_settings": dict(llm_settings or {}),
+        "ocr_mode": ocr_mode or "auto",
+        "rag_mode": rag_mode or "auto",
         "control": AgentControl(**control_kwargs),
         "started_at": perf_counter(),
         "user_context": {"department": department, "as_of": as_of},

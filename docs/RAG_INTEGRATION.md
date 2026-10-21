@@ -1,5 +1,7 @@
 # 真实 RAG 接入说明
 
+工作台侧栏支持当前会话覆盖 RAG 模式；「自动降级」沿用服务端 `RAG_MODE`，Milvus 失败时仍按 Milvus → local → mock 降级，实际检索来源及降级原因会进入审核轨迹。
+
 系统现在支持三种制度检索模式：
 
 | 模式 | 配置 | 说明 |
@@ -168,11 +170,43 @@ bge-m3 权重约 2GB，**加载一次约 13 秒**（冷盘）。所以 `app/rag/
 
 | 场景 | 做法 |
 | --- | --- |
-| 演示/单进程使用 | 只让一个进程承担检索：要么只用工作台，要么只用 API；另一个进程的审核会降级到 mock（trace 可见，不会给出错误结论） |
-| 多进程/生产 | 换成 **Milvus 服务端**（独立进程，客户端可并发），把 `MILVUS_URI` 指向它即可；或用 `RAG_MODE=local`（纯文件切片检索，无锁问题） |
+| 演示/单进程使用 | 用默认的 Milvus Lite（索引落在 `data/rag/policy.db`），只让一个进程承担检索 |
+| **多进程/生产（推荐）** | 换成 **Milvus 服务端**：各进程并发访问同一个库，锁问题消失（见下方一条命令起服务） |
+| 轻量交付 | `RAG_MODE=local`（纯文件切片关键词检索，零依赖、无锁问题） |
 
-集成测试 `tests/test_rag_milvus.py` 会断言"确实走了 milvus 且未降级"，并在缺少权重目录时整组跳过 ——
-避免出现"环境没配好、测试却全绿"的假信心（这是实际踩过的坑）。
+#### 一条命令起 Milvus 服务端（Docker，嵌入式 etcd + 本地存储）
+
+不需要额外的 etcd / MinIO 容器（`ETCD_USE_EMBED` + `COMMON_STORAGETYPE=local` 组合）：
+
+```bash
+docker run -d --name milvus-standalone --restart unless-stopped \
+  -e ETCD_USE_EMBED=true \
+  -e ETCD_DATA_DIR=/var/lib/milvus/etcd \
+  -e ETCD_CONFIG_PATH=/milvus/configs/advanced/etcd.yaml \
+  -e COMMON_STORAGETYPE=local \
+  -v "E:/Agent/milvus/volumes/milvus:/var/lib/milvus" \
+  -p 19530:19530 -p 9091:9091 -p 2379:2379 \
+  milvusdb/milvus:v2.6.6 \
+  milvus run standalone
+```
+
+然后 `.env` 里加一行、重建一次索引即可（**代码不用改**）：
+
+```env
+MILVUS_URI=http://127.0.0.1:19530
+```
+
+```bash
+python -m app.rag.build_index        # 索引建到服务端(不再是本地 policy.db)
+```
+
+- 服务端就绪判据：`curl http://127.0.0.1:9091/healthz` 返回 OK；
+- 镜像版本要跟 `pymilvus` 匹配（本项目用 `pymilvus 3.0.1`，对应服务端 `v2.6.6`）；
+- 此时 `milvus-lite` 依赖不再需要（`requirements-rag.txt` 仍保留，兼容不配 `MILVUS_URI` 的单机用法）；
+- 自托管、数据不出内网 —— 与企业「私密信息不外露」的定位一致。
+
+集成测试 `tests/test_rag_milvus.py` 会断言"确实走了 milvus 且未降级"，并在缺少权重目录/索引不可用时整组跳过
+（跳过原因里带出根因，例如锁被别的进程占用）—— 避免出现"环境没配好、测试却全绿"的假信心（这是实际踩过的坑）。
 
 ## 3. RAG 评测指标
 
